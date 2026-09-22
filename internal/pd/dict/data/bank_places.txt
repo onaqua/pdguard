@@ -1,0 +1,63 @@
+# Toponyms and words that identify the BANK's own premises. The specification is
+# explicit that a branch address is not the client's personal data, so these
+# never turn an address-shaped fragment into a masked span.
+#
+# The street names below are Alfa-Bank's Moscow head-office addresses; they are
+# listed in the bare stem so both "Каланчёвская" and "Каланчёвской" hit after
+# SafeLower plus the detector's own suffix trimming.
+
+# ---- адреса головных офисов ----
+каланчёвская
+каланчевская
+каланчёвской
+каланчевской
+каланчёвскую
+машкова
+академика сахарова
+сахарова
+проспект академика сахарова
+кутузовский
+новосущёвская
+новосущевская
+трубная
+арбат
+
+# ---- слова-маркеры собственных помещений ----
+отделение
+отделения
+отделении
+отделений
+офис
+офиса
+офисе
+офисы
+допофис
+дополнительный офис
+доп офис
+головной офис
+центральный офис
+центральное отделение
+филиал
+филиала
+филиале
+представительство
+операционный офис
+операционная касса
+кредитно-кассовый офис
+ккo
+банкомат
+банкомата
+банкоматы
+терминал
+точка обслуживания
+центр ипотечного кредитования
+премиум-офис
+alfa
+alfabank
+alfa-bank
+operations
+head office
+main office
+branch
+office
+atm

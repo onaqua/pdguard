@@ -1,0 +1,38 @@
+{"id":"date-ext-001","text":"Дата рождения 12.05.1990, второй вариант 1990.12.05, третий 12 мая 1990 года","expect_types":["BIRTH_DATE"],"note":"three spellings behind one anchor: the reported propagation gap"}
+{"id":"date-ext-002","text":"род. 12.05.1990","expect_types":["BIRTH_DATE"],"note":"abbreviated anchor rod. with a dot"}
+{"id":"date-ext-003","text":"д.р. 12.05.1990","expect_types":["BIRTH_DATE"],"note":"abbreviated anchor d.r."}
+{"id":"date-ext-004","text":"Анкета: 12.05.90 г.р.","expect_types":["BIRTH_DATE"],"note":"two digit year with a trailing g.r."}
+{"id":"date-ext-005","text":"Клиент 12.05.1990г.р.","expect_types":["BIRTH_DATE"],"note":"right anchor glued to the date, as scanned documents write it"}
+{"id":"date-ext-006","text":"Анкета заполнена, 12.05.1990 года рождения","expect_types":["BIRTH_DATE"],"note":"long right anchor, the words stay verbatim"}
+{"id":"date-ext-007","text":"дата рождения 12051990","expect_types":["BIRTH_DATE"],"note":"no separators at all, accepted only because of the anchor"}
+{"id":"date-ext-008","text":"дата рождения 19900512","expect_types":["BIRTH_DATE"],"note":"no separators, ISO basic order"}
+{"id":"date-ext-009","text":"дата рождения 1.5.1990","expect_types":["BIRTH_DATE"],"note":"no leading zeros"}
+{"id":"date-ext-010","text":"дата рождения 01.05.1990","expect_types":["BIRTH_DATE"],"note":"leading zeros"}
+{"id":"date-ext-011","text":"дата рождения 1990-05-12","expect_types":["BIRTH_DATE"],"note":"ISO 8601, order fixed by the standard"}
+{"id":"date-ext-012","text":"Даты рождения детей: 12.05.2001, 03.07.2003, 21.11.2005","expect_types":["BIRTH_DATE"],"note":"enumeration behind one anchor"}
+{"id":"date-ext-013","text":"Дата рождения указана в диапазоне с 12.05.1990 по 20.06.1990","expect_types":["BIRTH_DATE"],"note":"both ends of a range"}
+{"id":"date-ext-014","text":"Клиент, родившийся 12 августа 1990 года, обратился повторно","expect_types":["BIRTH_DATE"],"note":"participle anchor, month in the genitive"}
+{"id":"date-ext-015","text":"дата рождения 25 декабря 1985 г.","expect_types":["BIRTH_DATE"],"note":"abbreviated year tail"}
+{"id":"date-ext-016","text":"дата рождения 12 янв. 1990","expect_types":["BIRTH_DATE"],"note":"abbreviated month with a dot"}
+{"id":"date-ext-017","text":"дата рождения 12 сентябрю 1990","expect_types":["BIRTH_DATE"],"note":"month word in an oblique case the dictionary carries"}
+{"id":"date-ext-018","text":"Дата рождения 12 мая 90","expect_types":["BIRTH_DATE"],"note":"textual month with a two digit year"}
+{"id":"date-ext-019","text":"Дата рождения: двенадцатого мая 1990 года","expect_types":["BIRTH_DATE"],"note":"spelled out day in the genitive"}
+{"id":"date-ext-020","text":"Date of birth 12.05.1990","expect_types":["BIRTH_DATE"],"note":"English anchor"}
+{"id":"date-ext-021","text":"Дата выдачи 20 июня 2015 года","expect_types":["PASSPORT_ISSUE_DATE"],"note":"issue date with a textual month"}
+{"id":"date-ext-022","text":"Passport issued 20.06.2015","expect_types":["PASSPORT_ISSUE_DATE"],"note":"English issue anchor"}
+{"id":"date-ext-023","text":"Паспорт выдан 20.06.2015, продлён 21.07.2015","expect_types":["PASSPORT_ISSUE_DATE"],"note":"two issue dates in one clause"}
+{"id":"date-ext-024","text":"Заявление подано 01.09.2024, срок рассмотрения до 15.10.2024","expect_types":[],"note":"business dates: recent, unanchored, must stay verbatim"}
+{"id":"date-ext-025","text":"Встреча назначена на 10.10.2025","expect_types":[],"note":"a future business date is not a birth date"}
+{"id":"date-ext-026","text":"Отчётный период закрыт 31.12.2025","expect_types":[],"note":"reporting period, not personal data"}
+{"id":"date-ext-027","text":"Срок действия тарифа с 01.03.2020 по 01.03.2026","expect_types":[],"note":"a business range is not a pair of birth dates"}
+{"id":"date-ext-028","text":"Версия приложения 1.2.30","expect_types":[],"note":"a version string that parses as a date"}
+{"id":"date-ext-029","text":"Договор 12-05-1990 расторгнут","expect_types":[],"note":"contract number"}
+{"id":"date-ext-030","text":"Заказ 01.02.1999 отправлен","expect_types":[],"note":"order number"}
+{"id":"date-ext-031","text":"Номер 12051990 присвоен обращению","expect_types":[],"note":"eight digits with no anchor are an identifier, never a date"}
+{"id":"date-ext-032","text":"Время начала 12:05, окончания 12:45","expect_types":[],"note":"time of day"}
+{"id":"date-ext-033","text":"Идентификатор 1112.05.19901","expect_types":[],"note":"digits inside a longer run"}
+{"id":"date-ext-034","text":"Дата рождения 31.02.1990 указана с ошибкой","expect_types":[],"note":"an impossible calendar date stays verbatim even behind an anchor"}
+{"id":"date-ext-035","text":"Дата рождения 29.02.1990 не существует","expect_types":[],"note":"29 February in a common year"}
+{"id":"date-ext-036","text":"В 1990 началась история банка","expect_types":[],"note":"a bare year with no construction around it"}
+{"id":"date-ext-037","text":"Сборка 2.10.2024 выложена в прод","expect_types":[],"note":"a build number shaped like a date"}
+{"id":"date-ext-038","text":"Годовщина свадьбы 1990 года отмечена","expect_types":[],"note":"goda is not goda rozhdeniya"}

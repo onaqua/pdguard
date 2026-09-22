@@ -1,0 +1,747 @@
+openapi: 3.0.3
+
+info:
+  title: pdguard — Модуль безопасности персональных данных
+  version: "1.0.0"
+  description: |
+    Реализация контракта `/process` из Приложения A ТЗ трека «Модуль безопасности
+    персональных данных», плюс служебные эндпоинты сервиса.
+
+    ЛОГИКА ЕДИНОГО ЭНДПОИНТА (как этого требует ТЗ):
+      * Эндпоинт один — `POST /process`. Он обрабатывает и маскирование, и демаскирование.
+      * Направление определяется по `payload_id` — это ключ корреляции
+        «маскирование → демаскирование».
+      * Первый запрос с новым `payload_id` (`payload` = исходная строка) →
+        сервис возвращает маску и запоминает соответствие.
+      * Второй запрос с ТЕМ ЖЕ `payload_id` (`payload` = ранее возвращённая маска) →
+        сервис возвращает исходную строку.
+      * Ответ всегда `{"result": "<строка>"}`.
+
+    ОТЛИЧИЯ РЕАЛИЗАЦИИ ОТ МИНИМАЛЬНОГО КОНТРАКТА (всё — в сторону надёжности,
+    контракт не нарушается):
+      * Направление выводится не из счётчика обращений, а из того, ЧЕМ является
+        `payload`. Если пришла та же исходная строка, что и в первый раз, — это
+        ретрай прямого шага, и сервис отдаёт ту же самую маску. Эндпоинт
+        идемпотентен по `payload_id` (Приложение B, до 3 попыток на запрос).
+      * Сравнение `payload_id` регистронезависимое (раздел 4.1 ТЗ).
+      * Неизвестные поля в теле запроса игнорируются, а не приводят к 400.
+      * При внутреннем сбое по умолчанию возвращается 200 с исходным payload
+        (`server.fail_open`), потому что прогон останавливается после 5 невалидных
+        ответов подряд. Поведение отключается настройкой.
+
+    ПРИВАТНОСТЬ: персональные данные не попадают ни в логи, ни в метрики, ни в
+    ответы служебных эндпоинтов. `/admin/detect` возвращает только категории,
+    смещения и длины — значения не возвращаются никогда.
+
+servers:
+  - url: http://localhost:8080
+    description: Локальный запуск (docker compose up -d --build)
+  - url: https://your-solution.example.com
+    description: HTTPS (самоподписанный сертификат допускается — проверка идёт с ssl_verify=false)
+
+tags:
+  - name: process
+    description: Контракт Приложения A — маскирование и демаскирование
+  - name: ops
+    description: Пробы состояния и метрики
+  - name: admin
+    description: Управление конфигурацией и отладка детекции
+
+paths:
+
+  /process:
+    post:
+      tags: [process]
+      operationId: process
+      summary: Маскирование/демаскирование строки (коррелируется по payload_id)
+      description: |
+        Направление операции выводится из состояния, сохранённого для `payload_id`:
+
+        | Состояние хранилища | Что пришло в `payload` | Что вернётся |
+        |---|---|---|
+        | записи нет | исходный текст | маска (запись создаётся) |
+        | запись есть | ровно наша маска | исходный текст |
+        | запись есть | ровно исходный текст | та же маска (идемпотентный ретрай) |
+        | запись есть | ни то, ни другое | новая маска (запись перезаписывается) |
+        | записи нет | похоже на маску | тот же `payload` без изменений |
+
+        Пустой `payload` — валидный вход: возвращается пустой `result`.
+      parameters:
+        - $ref: '#/components/parameters/SystemId'
+        - $ref: '#/components/parameters/ApiKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProcessRequest'
+            examples:
+              mask:
+                summary: Прямой шаг — маскирование
+                value:
+                  payload: "Клиент Иванов Иван Иванович, паспорт 4509 123456"
+                  payload_id: "8a77d363c7c044b49b41d7b8a448243a"
+              demask:
+                summary: Обратный шаг — демаскирование
+                value:
+                  payload: "Клиент И. И. И., паспорт 45** ****56"
+                  payload_id: "8a77d363c7c044b49b41d7b8a448243a"
+      responses:
+        '200':
+          description: |
+            Успешная обработка. На прямом шаге — замаскированная строка,
+            на обратном — исходная.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessResponse'
+              examples:
+                mask:
+                  summary: Ответ на прямой шаг
+                  value:
+                    result: "Клиент И. И. И., паспорт 45** ****56"
+                demask:
+                  summary: Ответ на обратный шаг
+                  value:
+                    result: "Клиент Иванов Иван Иванович, паспорт 4509 123456"
+        '400':
+          description: |
+            Отсутствует `payload_id` либо тело не является корректным JSON.
+            Это единственные случаи, когда сервис отказывается отвечать 200 на
+            корректно доставленный запрос: восстановить намерение вызывающего
+            невозможно.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "payload_id is required"
+        '401':
+          description: |
+            Не совпал `X-API-Key` системы. Возможен только при
+            `require_system: true` и непустом `api_key` у системы.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: |
+            Система неизвестна или выключена. Возможен при `require_system: true`,
+            а также если в конфигурации не осталось рабочей системы по умолчанию.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "system is unknown or disabled"
+        '405':
+          description: Метод не поддерживается; заголовок `Allow` содержит `POST`.
+        '413':
+          description: Тело больше `server.max_body_bytes` (по умолчанию 8 МиБ).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "request body is too large"
+        '429':
+          description: |
+            Достигнут лимит одновременных запросов (`server.max_concurrent`).
+            Допустимо под нагрузкой: проверяющая система применит ожидание и
+            ретраи с учётом `Retry-After`. По умолчанию лимит выключен
+            (`max_concurrent: 0`) и этот код не возвращается.
+          headers:
+            Retry-After:
+              description: Через сколько секунд повторить запрос.
+              schema:
+                type: integer
+                example: 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Busy'
+        '4XX':
+          description: Прочие ошибки запроса.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: |
+            Обработка не удалась и `server.fail_open` выключен. При включённом
+            fail_open (значение по умолчанию) этот код не возвращается — вместо
+            него отдаётся 200 с неизменённым payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: |
+            Истёк `server.process_timeout_ms` и `server.fail_open` выключен.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '5XX':
+          description: Внутренняя ошибка сервиса.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /health:
+    get:
+      tags: [ops]
+      operationId: health
+      summary: Проба живости
+      description: |
+        Всегда 200, пока процесс жив. Намеренно ничего не проверяет: проба,
+        способная упасть из-за зависимости, превращает деградацию в рестарт.
+        Не отбрасывается ограничителем конкурентности.
+      responses:
+        '200':
+          description: Процесс жив
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  version:
+                    type: string
+                    example: v1.0.0
+
+  /ready:
+    get:
+      tags: [ops]
+      operationId: ready
+      summary: Проба готовности
+      description: |
+        200 только пока инстанс должен получать трафик. При получении SIGTERM
+        флаг снимается до начала слива соединений, чтобы балансировщик перестал
+        слать новые запросы.
+      responses:
+        '200':
+          description: Готов принимать трафик
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ready
+        '503':
+          description: Запуск или остановка
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: not ready
+
+  /metrics:
+    get:
+      tags: [ops]
+      operationId: metrics
+      summary: Метрики в формате Prometheus
+      description: |
+        Latency (гистограммы по операциям), RPS, TPS, счётчики найденных
+        категорий ПД, состояние хранилища. Значения ПД в метриках не
+        присутствуют — только имена категорий в метке `type`.
+      responses:
+        '200':
+          description: Экспозиция Prometheus
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: |
+                # HELP pdguard_rps Requests per second over the sliding window.
+                # TYPE pdguard_rps gauge
+                pdguard_rps 998.4
+
+  /stats:
+    get:
+      tags: [ops]
+      operationId: stats
+      summary: Сводка счётчиков в JSON
+      description: |
+        То же, что /metrics, но в человекочитаемом виде: версия, аптайм,
+        квантили латентности по операциям, RPS/TPS, счётчики категорий ПД,
+        статистика хранилища, размеры словарей, список стратегий маскирования.
+      responses:
+        '200':
+          description: Сводка
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stats'
+
+  /openapi.yaml:
+    get:
+      tags: [ops]
+      operationId: openapi
+      summary: Этот документ
+      description: Спецификация встроена в бинарник (go:embed), файловая система не требуется.
+      responses:
+        '200':
+          description: Спецификация OpenAPI
+          content:
+            application/yaml:
+              schema:
+                type: string
+        '404':
+          description: Спецификация не включена в сборку
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /admin/config:
+    get:
+      tags: [admin]
+      operationId: adminConfigGet
+      summary: Текущая конфигурация; все секреты скрыты
+      description: |
+        Отдаёт ровно ту конфигурацию, которой живёт процесс, в том же формате,
+        в каком она лежит на диске. Поля `api_key` и `admin_token` заменены на
+        `"***"`.
+      security:
+        - adminToken: []
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Конфигурация со скрытыми секретами
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Config'
+        '401':
+          description: Токен администратора отсутствует или неверен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags: [admin]
+      operationId: adminConfigPut
+      summary: Заменить работающую конфигурацию
+      description: |
+        Конфигурация валидируется, публикуется атомарно и записывается на диск
+        (через временный файл и rename). Невалидная конфигурация отвергается, и
+        работающая остаётся нетронутой.
+
+        Система, у которой `api_key` равен `"***"`, сохраняет свой прежний ключ,
+        поэтому цикл GET → правка → PUT не уничтожает секрет.
+
+        Вступает в силу немедленно: таймаут, лимит тела, fail_open, набор систем
+        и правила по типам ПД. Исключение — `server.max_concurrent`: ёмкость
+        семафора фиксируется при старте, для её изменения нужен рестарт (ответ
+        сообщает об этом полем `max_concurrent_applies: false`).
+      security:
+        - adminToken: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Config'
+      responses:
+        '200':
+          description: Применено
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: applied
+                  persisted:
+                    type: boolean
+                    description: Записано ли на диск (false, если сервис запущен без файла конфигурации)
+                  max_concurrent_applies:
+                    type: boolean
+                    description: Всегда false — см. описание
+        '400':
+          description: Конфигурация невалидна; работающая не изменена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: 'config: system "analytics" type "FIO": unknown mask strategy "stars"'
+        '401':
+          description: Токен администратора отсутствует или неверен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /admin/detect:
+    post:
+      tags: [admin]
+      operationId: adminDetect
+      summary: Отладочный отчёт о том, что нашли детекторы
+      description: |
+        Возвращает категории, количества и байтовые смещения. Найденные ЗНАЧЕНИЯ
+        не возвращаются ни при каких условиях — эндпоинт рассчитан на вызов
+        поверх реальных данных во время демонстрации.
+
+        Применяются правила системы `enabled` и `min_confidence`. Правило
+        `requires_companion` здесь НЕ применяется: оно относится к этапу
+        маскирования и живёт в движке.
+      security:
+        - adminToken: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SystemId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payload]
+              properties:
+                payload:
+                  type: string
+                  example: "Иванов Иван Иванович, карта 4276 3801 2345 6789"
+      responses:
+        '200':
+          description: Отчёт о детекции без значений
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectResponse'
+        '400':
+          description: Тело не является корректным JSON
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Токен администратора отсутствует или неверен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+
+  securitySchemes:
+    adminToken:
+      type: apiKey
+      in: header
+      name: X-Admin-Token
+      description: Значение из PDGUARD_ADMIN_TOKEN или server.admin_token. Пустой токен оставляет /admin/* открытым.
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: "Тот же токен в форме `Authorization: Bearer <token>`."
+
+  parameters:
+    SystemId:
+      name: X-System-Id
+      in: header
+      required: false
+      description: |
+        Идентификатор системы-потребителя, сравнивается без учёта регистра.
+        Необязателен: при `require_system: false` (значение по умолчанию, и
+        именно оно нужно для проверяющей системы) неизвестный или отсутствующий
+        идентификатор обслуживается системой по умолчанию.
+      schema:
+        type: string
+        example: chat-assistant
+    ApiKey:
+      name: X-API-Key
+      in: header
+      required: false
+      description: |
+        Общий секрет системы. Проверяется только при `require_system: true` и
+        только если у системы задан непустой `api_key`. Сравнение выполняется
+        за константное время.
+      schema:
+        type: string
+
+  schemas:
+
+    ProcessRequest:
+      type: object
+      required: [payload, payload_id]
+      properties:
+        payload:
+          type: string
+          description: |
+            Строка для обработки. На прямом шаге — исходный текст с ПД;
+            на обратном шаге — ваша же ранее возвращённая замаскированная строка
+            (тот же payload_id).
+          example: "Клиент Иванов Иван Иванович, паспорт 4509 123456"
+        payload_id:
+          type: string
+          minLength: 1
+          description: |
+            Идентификатор корреляции. Один и тот же для пары
+            маскирование → демаскирование. Сравнивается без учёта регистра и с
+            обрезкой пробелов по краям.
+          example: "8a77d363c7c044b49b41d7b8a448243a"
+      additionalProperties: true
+
+    ProcessResponse:
+      type: object
+      required: [result]
+      properties:
+        result:
+          type: string
+          description: |
+            Результат обработки: замаскированная строка на прямом шаге,
+            исходная — на обратном. Текст вне персональных данных совпадает с
+            входом байт в байт.
+          example: "Клиент И. И. И., паспорт 45** ****56"
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Краткое описание причины. Не содержит фрагментов payload.
+          example: "payload_id is required"
+
+    Busy:
+      type: object
+      properties:
+        error:
+          type: string
+          example: busy
+        retry_after:
+          type: integer
+          description: Дублирует заголовок Retry-After, в секундах.
+          example: 1
+
+    DetectResponse:
+      type: object
+      properties:
+        bytes:
+          type: integer
+          description: Длина payload в байтах
+        count:
+          type: integer
+          description: Сколько спанов прошло фильтры системы
+        system:
+          type: string
+          description: Идентификатор применённой системы
+        types:
+          type: object
+          description: Количество находок по категориям
+          additionalProperties:
+            type: integer
+          example:
+            FIO: 1
+            CARD_NUMBER: 1
+        spans:
+          type: array
+          items:
+            $ref: '#/components/schemas/DetectHit'
+
+    DetectHit:
+      type: object
+      description: Одна находка. Поля со значением намеренно отсутствуют.
+      properties:
+        type:
+          type: string
+          example: CARD_NUMBER
+        start:
+          type: integer
+          description: Байтовое смещение начала в исходном тексте
+        end:
+          type: integer
+          description: Байтовое смещение конца (полуинтервал)
+        len:
+          type: integer
+        conf:
+          type: number
+          format: double
+          description: Уверенность детектора, 0..1
+          example: 0.99
+        src:
+          type: string
+          description: Имя детектора
+          example: finance
+        hint:
+          type: string
+          description: Подформа находки
+          example: visa
+
+    Stats:
+      type: object
+      properties:
+        version:
+          type: string
+        uptime_s:
+          type: integer
+        ready:
+          type: boolean
+        detectors:
+          type: integer
+        strategies:
+          type: array
+          items:
+            type: string
+        dict:
+          type: object
+          additionalProperties:
+            type: integer
+        store:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+        metrics:
+          type: object
+          description: Снимок счётчиков — by_op с квантилями, rps, tps, pd_detected и прочее.
+          additionalProperties: true
+
+    Config:
+      type: object
+      description: |
+        Формат файла configs/config.json. Подробное описание каждого поля —
+        в docs/CONFIG.md.
+      properties:
+        server:
+          type: object
+          properties:
+            addr:
+              type: string
+              example: ":8080"
+            read_timeout_ms:
+              type: integer
+              example: 5000
+            write_timeout_ms:
+              type: integer
+              example: 15000
+            idle_timeout_ms:
+              type: integer
+              example: 60000
+            max_body_bytes:
+              type: integer
+              format: int64
+              example: 8388608
+            process_timeout_ms:
+              type: integer
+              example: 5000
+            max_concurrent:
+              type: integer
+              description: 0 отключает ограничитель конкурентности
+              example: 0
+            shed_on_429:
+              type: boolean
+            fail_open:
+              type: boolean
+              description: Отсутствие поля означает true
+            admin_token:
+              type: string
+        store:
+          type: object
+          properties:
+            shards:
+              type: integer
+              example: 256
+            ttl_seconds:
+              type: integer
+              example: 3600
+            max_entries:
+              type: integer
+              example: 200000
+            max_value_bytes:
+              type: integer
+              example: 8388608
+        log:
+          type: object
+          properties:
+            level:
+              type: string
+              enum: [debug, info, warn, error]
+            format:
+              type: string
+              enum: [json, text]
+            sample_every:
+              type: integer
+              description: 0 и 1 означают «логировать всё»
+        default_system:
+          type: string
+          example: default
+        require_system:
+          type: boolean
+          example: false
+        systems:
+          type: array
+          items:
+            $ref: '#/components/schemas/System'
+
+    System:
+      type: object
+      required: [id, enabled, demask, types]
+      properties:
+        id:
+          type: string
+          description: Приводится к нижнему регистру при загрузке
+          example: chat-assistant
+        name:
+          type: string
+          example: Chat assistant
+        enabled:
+          type: boolean
+          description: Выключенная система не обслуживается даже при явном указании
+        api_key:
+          type: string
+          description: Пустая строка означает «без аутентификации»
+        demask:
+          type: boolean
+          description: |
+            false означает, что соответствие не сохраняется вовсе: обратный шаг
+            для такой системы вернёт присланный payload без изменений.
+        types:
+          type: object
+          description: Ключ — идентификатор типа ПД (FIO, PHONE, CARD_NUMBER, ...)
+          additionalProperties:
+            $ref: '#/components/schemas/TypeRule'
+
+    TypeRule:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        strategy:
+          type: string
+          enum:
+            - stars_keep2
+            - stars_all
+            - initials
+            - initials_latin
+            - label
+            - token
+            - synthetic
+            - keep_domain
+            - none
+        requires_companion:
+          type: array
+          description: |
+            Маскировать только если в том же payload найден хотя бы один из
+            перечисленных типов. Пустой список означает «маскировать всегда».
+          items:
+            type: string
+          example: ["CARD_NUMBER"]
+        min_confidence:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Нижний порог уверенности; 0 означает «взять значение по умолчанию» (0.7)
+          example: 0.7

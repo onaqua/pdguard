@@ -1,0 +1,42 @@
+{"id":"addr-ext-001","text":"Клиент проживает в Екатеринбурге.","expect_types":["CITY"],"note":"city in the prepositional case, residence anchor"}
+{"id":"addr-ext-002","text":"Клиент прописан в Твери, ул. Мира, д. 3","expect_types":["CITY","STREET","HOUSE"],"note":"oblique city plus a full street and house"}
+{"id":"addr-ext-003","text":"Проживает по адресу: Москва, Тверская 12, кв 5","expect_types":["CITY","STREET","HOUSE","APARTMENT"],"note":"one line address with no street marker at all"}
+{"id":"addr-ext-004","text":"Адрес: ул Ленина д 5 кв 12","expect_types":["STREET","HOUSE","APARTMENT"],"note":"abbreviations without dots"}
+{"id":"addr-ext-005","text":"Адрес: ул Ленина, д 5 корп 2, кв 12","expect_types":["STREET","HOUSE","APARTMENT"],"note":"corpus without dots"}
+{"id":"addr-ext-006","text":"Адрес доставки: дом 5 по улице Ленина","expect_types":["HOUSE","STREET"],"note":"reverse order, house before the street"}
+{"id":"addr-ext-007","text":"Адрес: ул. Ленина д. 5","expect_types":["STREET","HOUSE"],"note":"street and house with no comma between them"}
+{"id":"addr-ext-008","text":"Проживает по Ленинскому проспекту, д. 12","expect_types":["STREET","HOUSE"],"note":"street type in the dative, name on its left"}
+{"id":"addr-ext-009","text":"Зарегистрирован на улице Вавилова, д. 15","expect_types":["STREET","HOUSE"],"note":"street type in the prepositional case"}
+{"id":"addr-ext-010","text":"Адрес: ул. Мира, д. 5 литера Б","expect_types":["STREET","HOUSE"],"note":"house with a literal letter"}
+{"id":"addr-ext-011","text":"Адрес: ул. Мира, д. 5/2","expect_types":["STREET","HOUSE"],"note":"house written as a fraction"}
+{"id":"addr-ext-012","text":"Адрес: ул. Тверская, владение 3с1","expect_types":["STREET","HOUSE"],"note":"владение with a glued building index"}
+{"id":"addr-ext-013","text":"Адрес: г. Москва, ул. Вавилова, д. 5, 119991","expect_types":["CITY","STREET","HOUSE","POSTAL_CODE"],"note":"postal code closing the address line"}
+{"id":"addr-ext-014","text":"Клиент проживает: Новосибирск, ул. Ленина, д. 12, кв. 34, 630099","expect_types":["CITY","STREET","HOUSE","APARTMENT","POSTAL_CODE"],"note":"five components, index last"}
+{"id":"addr-ext-015","text":"Адрес: Московская область, г. Люберцы, ул. Мира, д. 5","expect_types":["CITY","STREET","HOUSE"],"note":"region as part of a client address"}
+{"id":"addr-ext-016","text":"Адрес: Республика Татарстан, г. Казань, ул. Баумана, д. 3","expect_types":["CITY","STREET","HOUSE"],"note":"republic named on the right of the marker"}
+{"id":"addr-ext-017","text":"Адрес регистрации: Краснодарский край, г. Сочи, ул. Мира, д. 2, кв. 7","expect_types":["CITY","STREET","HOUSE","APARTMENT"],"note":"krai plus a four component address"}
+{"id":"addr-ext-018","text":"Доставить по адресу: Санкт-Петербург, Невский проспект, 28","expect_types":["CITY","STREET","HOUSE"],"note":"hyphenated city with no settlement marker"}
+{"id":"addr-ext-019","text":"Клиент проживает в г. Москве.","expect_types":["CITY"],"note":"settlement marker with an oblique name"}
+{"id":"addr-ext-020","text":"Проживает в Сочи, ул. Морская, д. 4","expect_types":["CITY","STREET","HOUSE"],"note":"indeclinable city name"}
+{"id":"addr-ext-021","text":"Москва, Тверская 12, кв 5","expect_types":["CITY","STREET","HOUSE","APARTMENT"],"note":"markerless address with no anchor either"}
+{"id":"addr-ext-022","text":"Адрес: 119991, Москва, Ленинский проспект, д. 32, кв. 5","expect_types":["POSTAL_CODE","CITY","STREET","HOUSE","APARTMENT"],"note":"index first, street type on the right"}
+{"id":"addr-ext-023","text":"Проживает по адресу: г. Тверь, наб. реки Волги, д. 7, кв. 2","expect_types":["CITY","STREET","HOUSE","APARTMENT"],"note":"multi word embankment name"}
+{"id":"addr-ext-024","text":"Адрес: пос. Лесной, ул. Садовая, д. 4","expect_types":["CITY","STREET","HOUSE"],"note":"settlement abbreviation"}
+{"id":"addr-ext-025","text":"Проживает по адресу: мкр Северный, д. 12, кв. 3","expect_types":["STREET","HOUSE","APARTMENT"],"note":"microdistrict instead of a street"}
+{"id":"addr-ext-026","text":"Клиент проживает в Казани, Кремлёвская 5","expect_types":["CITY","STREET","HOUSE"],"note":"oblique city followed by a markerless street"}
+{"id":"addr-ext-050","text":"В Москве открылся новый филиал банка.","expect_types":[],"note":"city mention outside any client address"}
+{"id":"addr-ext-051","text":"Отделение банка по адресу г. Москва, ул. Каланчёвская, д. 27","expect_types":[],"note":"spec: branch address stays untouched even behind по адресу"}
+{"id":"addr-ext-052","text":"Экскурсия по Казани начинается утром.","expect_types":[],"note":"oblique city with a preposition but no address context"}
+{"id":"addr-ext-053","text":"Компания зарегистрирована в Москве и работает давно.","expect_types":[],"note":"legal entity registration is not a residence"}
+{"id":"addr-ext-054","text":"В Московской области построят новый завод.","expect_types":[],"note":"region alone is not an address"}
+{"id":"addr-ext-055","text":"Прошу доставить заказ в Москву до пятницы.","expect_types":[],"note":"delivery to a city is not a delivery address"}
+{"id":"addr-ext-056","text":"Перевод в Москве, 450000 рублей отправлен позже.","expect_types":[],"note":"six digits after a city but not closing the line"}
+{"id":"addr-ext-057","text":"Отчёт по Москве готов и согласован.","expect_types":[],"note":"city as the subject of a report"}
+{"id":"addr-ext-058","text":"Банкомат в доме 5 по улице Мира временно не работает.","expect_types":[],"note":"bank premises described by house and street"}
+{"id":"addr-ext-059","text":"На площади Ленина построили новый фонтан.","expect_types":[],"note":"square with no second address component"}
+{"id":"addr-ext-060","text":"Согласно п. 5 договора стороны согласовали оплату.","expect_types":[],"note":"contract clause is not a house number"}
+{"id":"addr-ext-061","text":"Городской округ Химки расширил свои границы.","expect_types":[],"note":"administrative news, not a client address"}
+{"id":"addr-ext-062","text":"Клиенту предложен дом площадью сто двадцать метров.","expect_types":[],"note":"дом followed by a word is a building, not a number"}
+{"id":"addr-ext-063","text":"Строительство в Твери идёт по графику.","expect_types":[],"note":"oblique city in a progress report"}
+{"id":"addr-ext-064","text":"Ближайшее отделение находится в Екатеринбурге.","expect_types":[],"note":"branch city is bank premises"}
+{"id":"addr-ext-065","text":"Банк открыл офис в Казани, на улице Баумана.","expect_types":[],"note":"bank premises named by an oblique city and a street"}

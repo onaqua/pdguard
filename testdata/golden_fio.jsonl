@@ -1,0 +1,36 @@
+{"id":"fio-ext-001","text":"Клиент Мирзоев Хуршед подтвердил заявку.","expect_types":["FIO"],"note":"surname plus a given name outside the dictionary"}
+{"id":"fio-ext-002","text":"Заявитель Иванов Хуршед обратился повторно.","expect_types":["FIO"],"note":"morphological pair after an anchor"}
+{"id":"fio-ext-003","text":"Перевод для Петрова Жаннет выполнен.","expect_types":["FIO"],"note":"oblique surname plus an unlisted given name"}
+{"id":"fio-ext-004","text":"Сотрудник Зайцев Велимир оформил документы.","expect_types":["FIO"],"note":"rare given name next to a dictionary surname"}
+{"id":"fio-ext-005","text":"Заёмщик Мирзоев Хуршед Рустамович погасил кредит.","expect_types":["FIO"],"note":"three parts, none of them in the given-name list"}
+{"id":"fio-ext-006","text":"Клиент Киров подтвердил заявку.","expect_types":["FIO"],"note":"town homonym read as a surname after an anchor"}
+{"id":"fio-ext-007","text":"Счёт оформлен на имя Кирова.","expect_types":["FIO"],"note":"town homonym in the genitive after a phrase anchor"}
+{"id":"fio-ext-008","text":"Заявитель: Киров.","expect_types":["FIO"],"note":"anchor separated from the surname by a colon"}
+{"id":"fio-ext-009","text":"Держатель карты Гагарин обратился в отделение.","expect_types":["FIO"],"note":"client sharing a surname with a public figure"}
+{"id":"fio-ext-010","text":"Г. Иванов обратился в банк.","expect_types":["FIO"],"note":"capital ambiguous initial before a dictionary surname"}
+{"id":"fio-ext-011","text":"Д. Петров направил заявление.","expect_types":["FIO"],"note":"another ambiguous initial, resolved by the capital"}
+{"id":"fio-ext-012","text":"Иванов\nИван\nИванович","expect_types":["FIO"],"note":"name split across three lines of a table"}
+{"id":"fio-ext-013","text":"Фамилия   Имя   Отчество\nИванов   Иван   Иванович","expect_types":["FIO"],"note":"header row followed by a data row"}
+{"id":"fio-ext-014","text":"Клиент      Иванов","expect_types":["FIO"],"note":"anchor and surname separated by a wide column gap"}
+{"id":"fio-ext-015","text":"Иванов\nИ.И.","expect_types":["FIO"],"note":"surname and initials on separate lines"}
+{"id":"fio-ext-016","text":"Клиент «Иванов Иван Иванович» заключил договор.","expect_types":["FIO"],"note":"name in guillemets"}
+{"id":"fio-ext-017","text":"(Иванов Иван Иванович)","expect_types":["FIO"],"note":"name in round brackets"}
+{"id":"fio-ext-018","text":"ФИО: Иванов Иван Иванович","expect_types":["FIO"],"note":"name after a labelled colon"}
+{"id":"fio-ext-019","text":"Подписал \"Иванов И.И.\" лично.","expect_types":["FIO"],"note":"surname and initials in straight quotes"}
+{"id":"fio-ext-020","text":"Клиент [Иванов Иван Иванович] подтвердил получение.","expect_types":["FIO"],"note":"name in square brackets"}
+{"id":"fio-ext-021","text":"Получатель Сидорова Жаннет ожидает перевод.","expect_types":["FIO"],"note":"feminine surname plus an unlisted given name"}
+{"id":"fio-ext-022","text":"Подпись: Г. Смирнов","expect_types":["FIO"],"note":"ambiguous initial under a signature label"}
+{"id":"fio-ext-101","text":"Город Киров стоит на реке Вятке.","expect_types":[],"note":"a town is not a client surname"}
+{"id":"fio-ext-102","text":"Перевод в Киров отправлен вчера.","expect_types":[],"note":"a town in a destination phrase, no personal-data anchor"}
+{"id":"fio-ext-103","text":"г. Пушкин известен своими парками.","expect_types":[],"note":"the lower-case abbreviation is a town, not an initial"}
+{"id":"fio-ext-104","text":"Г. Заявление принято к рассмотрению.","expect_types":[],"note":"an ambiguous initial before a word that is not a surname"}
+{"id":"fio-ext-105","text":"Отчёт от аудиторов направлен вовремя.","expect_types":[],"note":"a genitive plural is not a surname"}
+{"id":"fio-ext-106","text":"Скидка для постоянных клиентов действует до конца месяца.","expect_types":[],"note":"an anchor word next to ordinary vocabulary"}
+{"id":"fio-ext-107","text":"Творчество Александра Сергеевича Пушкина изучают в школе.","expect_types":[],"note":"a public figure named in full"}
+{"id":"fio-ext-108","text":"Памятник Юрию Алексеевичу Гагарину стоит на площади.","expect_types":[],"note":"a monument, not a client"}
+{"id":"fio-ext-109","text":"Библиотека имени Кирова закрыта на ремонт.","expect_types":[],"note":"an institution named after a person"}
+{"id":"fio-ext-110","text":"Договор подписан с ООО Иванов и партнёры.","expect_types":[],"note":"a company built from a surname"}
+{"id":"fio-ext-111","text":"Иванов\n\nПетров\n\nСидоров","expect_types":[],"note":"blank lines separate records and carry no anchor"}
+{"id":"fio-ext-112","text":"Станция метро Кировская закрыта на ремонт.","expect_types":[],"note":"an adjectival toponym is not a surname"}
+{"id":"fio-ext-113","text":"Платёж прошёл успешно, средства зачислены.","expect_types":[],"note":"ordinary banking prose"}
+{"id":"fio-ext-114","text":"Стихи Александра Пушкина знает каждый.","expect_types":[],"note":"a poet's work, the case the specification names"}

@@ -1,0 +1,527 @@
+{
+  "server": {
+    "addr": ":8080",
+    "read_timeout_ms": 5000,
+    "write_timeout_ms": 15000,
+    "idle_timeout_ms": 60000,
+    "max_body_bytes": 16777216,
+    "process_timeout_ms": 5000,
+    "max_concurrent": 256,
+    "shed_on_429": false,
+    "fail_open": true
+  },
+  "store": {
+    "shards": 256,
+    "ttl_seconds": 600,
+    "max_entries": 1000000,
+    "max_value_bytes": 8388608,
+    "max_bytes": 1073741824
+  },
+  "log": {
+    "level": "info",
+    "format": "json",
+    "sample_every": 0
+  },
+  "masking": {
+    "span_include_labels": true
+  },
+  "default_system": "default",
+  "require_system": false,
+  "systems": [
+    {
+      "id": "analytics",
+      "name": "Analytics pipeline",
+      "enabled": true,
+      "api_key": "demo-key-analytics",
+      "demask": false,
+      "types": {
+        "ADDRESS": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "APARTMENT": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "BANK_ACCOUNT": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "BIRTH_CERTIFICATE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "BIRTH_DATE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "BIRTH_PLACE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "CARD_HOLDER": {
+          "enabled": true,
+          "strategy": "initials_latin",
+          "min_confidence": 0.7
+        },
+        "CARD_NUMBER": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "CITIZENSHIP": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "CITY": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "COUNTRY": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "CVV": {
+          "enabled": true,
+          "strategy": "stars_all",
+          "requires_companion": [
+            "CARD_NUMBER"
+          ],
+          "min_confidence": 0.7
+        },
+        "DRIVER_LICENSE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "EMAIL": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "FIO": {
+          "enabled": true,
+          "strategy": "initials",
+          "min_confidence": 0.7
+        },
+        "FOREIGN_PASSPORT": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "HOUSE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "INN": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "MILITARY_ID": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "OMS_POLICY": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "PASSPORT": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "PASSPORT_ISSUER": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "PASSPORT_ISSUE_DATE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "PHONE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "PIN": {
+          "enabled": true,
+          "strategy": "stars_all",
+          "requires_companion": [
+            "CARD_NUMBER"
+          ],
+          "min_confidence": 0.7
+        },
+        "POSTAL_CODE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "RESIDENCE_PERMIT": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "SNILS": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "STREET": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "SUBDIVISION_CODE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        }
+      }
+    },
+    {
+      "id": "chat-assistant",
+      "name": "Chat assistant",
+      "enabled": true,
+      "api_key": "demo-key-chat-assistant",
+      "demask": true,
+      "types": {
+        "ADDRESS": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "APARTMENT": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "BANK_ACCOUNT": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "BIRTH_CERTIFICATE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "BIRTH_DATE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "BIRTH_PLACE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "CARD_HOLDER": {
+          "enabled": true,
+          "strategy": "initials_latin",
+          "min_confidence": 0.7
+        },
+        "CARD_NUMBER": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "CITIZENSHIP": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "CITY": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "COUNTRY": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "CVV": {
+          "enabled": true,
+          "strategy": "stars_all",
+          "requires_companion": [
+            "CARD_NUMBER"
+          ],
+          "min_confidence": 0.7
+        },
+        "DRIVER_LICENSE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "EMAIL": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "FIO": {
+          "enabled": true,
+          "strategy": "initials",
+          "min_confidence": 0.7
+        },
+        "FOREIGN_PASSPORT": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "HOUSE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "INN": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "MILITARY_ID": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "OMS_POLICY": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "PASSPORT": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "PASSPORT_ISSUER": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "PASSPORT_ISSUE_DATE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "PHONE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "PIN": {
+          "enabled": true,
+          "strategy": "stars_all",
+          "requires_companion": [
+            "CARD_NUMBER"
+          ],
+          "min_confidence": 0.7
+        },
+        "POSTAL_CODE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "RESIDENCE_PERMIT": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "SNILS": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "STREET": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "SUBDIVISION_CODE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        }
+      }
+    },
+    {
+      "id": "default",
+      "name": "Default consumer",
+      "enabled": true,
+      "api_key": "",
+      "demask": true,
+      "types": {
+        "ADDRESS": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "APARTMENT": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "BANK_ACCOUNT": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "BIRTH_CERTIFICATE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "BIRTH_DATE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "BIRTH_PLACE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "CARD_HOLDER": {
+          "enabled": true,
+          "strategy": "initials_latin",
+          "min_confidence": 0.7
+        },
+        "CARD_NUMBER": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "CITIZENSHIP": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "CITY": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "COUNTRY": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "CVV": {
+          "enabled": true,
+          "strategy": "stars_all",
+          "requires_companion": [
+            "CARD_NUMBER"
+          ],
+          "min_confidence": 0.7
+        },
+        "DRIVER_LICENSE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "EMAIL": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "FIO": {
+          "enabled": true,
+          "strategy": "initials",
+          "min_confidence": 0.7
+        },
+        "FOREIGN_PASSPORT": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "HOUSE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "INN": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "MILITARY_ID": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "OMS_POLICY": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "PASSPORT": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "PASSPORT_ISSUER": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "PASSPORT_ISSUE_DATE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "PHONE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "PIN": {
+          "enabled": true,
+          "strategy": "stars_all",
+          "requires_companion": [
+            "CARD_NUMBER"
+          ],
+          "min_confidence": 0.7
+        },
+        "POSTAL_CODE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "RESIDENCE_PERMIT": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "SNILS": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "STREET": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        },
+        "SUBDIVISION_CODE": {
+          "enabled": true,
+          "strategy": "stars_keep2",
+          "min_confidence": 0.7
+        }
+      }
+    }
+  ]
+}

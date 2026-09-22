@@ -1,0 +1,58 @@
+# Build output
+bin/
+dist/
+build/
+out/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+
+# Go tooling artefacts
+vendor/
+*.out
+*.prof
+*.pprof
+coverage.out
+coverage.html
+.gocache/
+.gomodcache/
+
+# Solution archives produced by `make zip`
+*.zip
+*.tar
+*.tar.gz
+
+# The task statement and its text extraction: large, copyrighted, and section
+# 7.1 forbids shipping anything but source in the solution archive.
+ds.pdf
+ds.txt
+
+# Datasets and generated fixtures — kept out of the repository so the archive
+# stays small; regenerate them locally instead.
+datasets/
+testdata/large/
+*.jsonl
+# ...except the golden corpora under testdata/, which are not generated: the
+# accuracy, tricky-case and regression tests read them directly, and cmd/bench
+# drives its load from them. Excluding them leaves a repository whose test
+# suite cannot run. 128 KB total, so size is not a reason to drop them.
+!testdata/*.jsonl
+
+# Local overrides. configs/config.json itself IS tracked (it is the shipped
+# default); per-developer variants are not.
+configs/config.local.json
+configs/*.local.json
+.env
+.env.*
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+.spec/
+.tmp/

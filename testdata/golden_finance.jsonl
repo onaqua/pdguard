@@ -1,0 +1,45 @@
+{"id":"fin-g01","text":"Оплата картой 4111.1111.1111.1111 прошла.","expect_types":["CARD_NUMBER"],"note":"card grouped with dots"}
+{"id":"fin-g02","text":"Списание 5500.0055.5555.5559 подтверждено.","expect_types":["CARD_NUMBER"],"note":"dotted card stands on luhn alone"}
+{"id":"fin-g03","text":"Оплата картой 4222222222222 принята.","expect_types":["CARD_NUMBER"],"note":"thirteen digit legacy visa"}
+{"id":"fin-g04","text":"Карта 6759 6498 2643 8453 128 действует.","expect_types":["CARD_NUMBER"],"note":"nineteen digit card, four-four-four-four-three"}
+{"id":"fin-g05","text":"Карта 41111111 11111111, списание выполнено.","expect_types":["CARD_NUMBER"],"note":"eight plus eight grouping next to a cue"}
+{"id":"fin-g06","text":"ИНН 7707 0838 93 указан в договоре.","expect_types":["INN"],"note":"ten digit inn typed in blocks"}
+{"id":"fin-g07","text":"ИНН 7707 0838 9324 подтверждён.","expect_types":["INN"],"note":"twelve digit inn typed in blocks"}
+{"id":"fin-g08","text":"Запрос по налоговому номеру 7707083893 отправлен.","expect_types":["INN"],"note":"oblique case of the spelled out inn cue"}
+{"id":"fin-g09","text":"Сведения об ИНН 770708389324 получены.","expect_types":["INN"],"note":"preposition before the cue"}
+{"id":"fin-g10","text":"Счет 40702 81090 00000 12345 открыт.","expect_types":["BANK_ACCOUNT"],"note":"account in blocks of five"}
+{"id":"fin-g11","text":"Счет 4070.2810.9000.0001.2345 открыт.","expect_types":["BANK_ACCOUNT"],"note":"account grouped with dots"}
+{"id":"fin-g12","text":"счёт 4070 28109 0000 0012 345 в рублях","expect_types":["BANK_ACCOUNT"],"note":"account in blocks of uneven size"}
+{"id":"fin-g13","text":"Реквизиты: DE89 3704 0044 0532 0130 00","expect_types":["BANK_ACCOUNT"],"note":"iban printed in groups of four"}
+{"id":"fin-g14","text":"Карта 4111 1111 1111 1111, код проверки 123.","expect_types":["CARD_NUMBER","CVV"],"note":"cvv cue in the nominative"}
+{"id":"fin-g15","text":"Карта 4111 1111 1111 1111, значение проверочного кода 456.","expect_types":["CARD_NUMBER","CVV"],"note":"cvv cue in the genitive"}
+{"id":"fin-g16","text":"Карта 4111 1111 1111 1111, трёхзначный код 147 с обратной стороны.","expect_types":["CARD_NUMBER","CVV"],"note":"cvv named by its length"}
+{"id":"fin-g17","text":"Карта 4111 1111 1111 1111, обратитесь к коду безопасности 321.","expect_types":["CARD_NUMBER","CVV"],"note":"cvv cue in the dative"}
+{"id":"fin-g18","text":"Карта 4111 1111 1111 1111, смена пин-кода 1234 выполнена.","expect_types":["CARD_NUMBER","PIN"],"note":"pin cue in the genitive"}
+{"id":"fin-g19","text":"Карта 4111 1111 1111 1111, ПИН код 4321 придёт отдельно.","expect_types":["CARD_NUMBER","PIN"],"note":"pin cue written as two words"}
+{"id":"fin-g20","text":"Карта 4111 1111 1111 1111, секретный код 9876 задан клиентом.","expect_types":["CARD_NUMBER","PIN"],"note":"pin named a secret code"}
+{"id":"fin-g21","text":"Звоните 8.916.123.45.67 в любое время.","expect_types":["PHONE"],"note":"phone typed with dots"}
+{"id":"fin-g22","text":"Контакт: +7.916.123.45.67","expect_types":["PHONE"],"note":"dotted phone with the plus prefix"}
+{"id":"fin-g23","text":"тел 916 123 4567","expect_types":["PHONE"],"note":"ten digits grouped three-three-four next to a cue"}
+{"id":"fin-g24","text":"мобильный 916 1234567","expect_types":["PHONE"],"note":"ten digits grouped three-seven next to a cue"}
+{"id":"fin-g25","text":"Телефон +7 495 123-45-67 доб. 123","expect_types":["PHONE"],"note":"number with an extension: the number is masked, the extension is plain text"}
+{"id":"fin-g26","text":"Телефоны: +7 916 123-45-67, +7 916 765-43-21","expect_types":["PHONE"],"note":"two numbers separated by a comma"}
+{"id":"fin-g27","text":"Тел: 8-916-123-45-67 / 8-495-111-22-33","expect_types":["PHONE"],"note":"two numbers separated by a slash"}
+{"id":"fin-g28","text":"Почта ivan_petrov@mail.ru для связи.","expect_types":["EMAIL"],"note":"underscore in the local part"}
+{"id":"fin-g29","text":"Пишите на <ivan@mail.ru>, ответим завтра.","expect_types":["EMAIL"],"note":"address in angle brackets"}
+{"id":"fin-g30","text":"Дубль на ivan+bank@mx.corp.example.co.uk отправлен.","expect_types":["EMAIL"],"note":"plus addressing on a deep subdomain"}
+{"id":"fin-g31","text":"Выписка выслана на 12345@mail.ru.","expect_types":["EMAIL"],"note":"local part of digits only"}
+{"id":"fin-g32","text":"IP сервера 192.168.10.10 недоступен.","expect_types":[],"note":"an address grouped like a phone number is not one"}
+{"id":"fin-g33","text":"Адрес шлюза 10.120.45.67 изменён.","expect_types":[],"note":"ten dotted digits without a country prefix"}
+{"id":"fin-g34","text":"Версия сборки 10.2.13.45.67 установлена.","expect_types":[],"note":"version string keeps its dots"}
+{"id":"fin-g35","text":"Карта 4276 **** **** 6789 привязана к профилю.","expect_types":[],"note":"already masked card is passed through untouched"}
+{"id":"fin-g36","text":"Банк получателя: БИК 044525225.","expect_types":[],"note":"bik identifies the bank, not the client"}
+{"id":"fin-g37","text":"КПП 770701001 организации.","expect_types":[],"note":"kpp is an organisation attribute"}
+{"id":"fin-g38","text":"Срок действия карты 09/28.","expect_types":[],"note":"expiry date is not among the listed categories"}
+{"id":"fin-g39","text":"Служебный ящик noreply@alfabank.ru не принимает писем.","expect_types":[],"note":"role mailbox on the bank domain"}
+{"id":"fin-g40","text":"Круглосуточная линия 8 800 555 35 35 работает без выходных.","expect_types":[],"note":"toll free line of the bank"}
+{"id":"fin-g41","text":"Единый номер службы 112 доступен с любого телефона.","expect_types":[],"note":"emergency short number"}
+{"id":"fin-g42","text":"Номер заказа 9161234567 уточните у оператора.","expect_types":[],"note":"ten bare digits with no telephone cue"}
+{"id":"fin-g43","text":"Сумма 1 234 567 890 123 рублей перечислена.","expect_types":[],"note":"thousands separators are not card grouping"}
+{"id":"fin-g44","text":"Артикул 1234567890123456 в каталоге.","expect_types":[],"note":"sixteen digits that fail luhn and have no cue"}
+{"id":"fin-g45","text":"Код подтверждения 123456 отправлен повторно.","expect_types":[],"note":"one time password is not a pin"}

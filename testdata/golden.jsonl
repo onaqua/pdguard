@@ -1,0 +1,196 @@
+{"id":"fio-001","text":"Клиент Иванов Иван Иванович обратился в отделение.","expect_types":["FIO"],"note":"canonical surname name patronymic"}
+{"id":"fio-002","text":"Заявку оформил Иван Иванович Иванов.","expect_types":["FIO"],"note":"name patronymic surname order"}
+{"id":"fio-003","text":"Счёт открыт на имя Иванова Ивана Ивановича.","expect_types":["FIO"],"note":"genitive case"}
+{"id":"fio-004","text":"Заявление подал Иванов И.И.","expect_types":["FIO"],"note":"surname with glued initials"}
+{"id":"fio-005","text":"Подпись: И. И. Иванов","expect_types":["FIO"],"note":"initials before the surname"}
+{"id":"fio-006","text":"Позвонил Иван Иванович и уточнил остаток.","expect_types":["FIO"],"note":"name and patronymic only"}
+{"id":"fio-007","text":"Клиент Петров-Водкин закрыл вклад.","expect_types":["FIO"],"note":"hyphenated surname"}
+{"id":"fio-008","text":"Получатель Сидоров подтвердил перевод.","expect_types":["FIO"],"note":"bare surname behind a role word"}
+{"id":"fio-009","text":"ИВАНОВ ИВАН ИВАНОВИЧ, ПАСПОРТ 4509 123456","expect_types":["FIO","PASSPORT"],"note":"all caps"}
+{"id":"fio-010","text":"клиент иванов иван иванович обратился в банк","expect_types":["FIO"],"note":"all lower case"}
+{"id":"fio-011","text":"Клиент Иванов Иван подтвердил заявку.","expect_types":["FIO"],"note":"surname and name without patronymic"}
+{"id":"fio-012","text":"Перевод для Иванова Ивана.","expect_types":["FIO"],"note":"genitive without patronymic"}
+{"id":"fio-013","text":"Договор заключён между Ивановым Иваном Ивановичем и Петровым Петром Петровичем.","expect_types":["FIO"],"note":"two people in one sentence, instrumental case"}
+{"id":"fio-014","text":"Доверенность выдана Мамину-Сибиряку на получение вклада.","expect_types":["FIO"],"note":"hyphenated surname, dative"}
+{"id":"fio-015","text":"Держатель карты: IVAN IVANOV","expect_types":["CARD_HOLDER"],"note":"latin embossed holder name"}
+{"id":"fio-016","text":"Имя на карте IVAN I IVANOV","expect_types":["CARD_HOLDER"],"note":"holder with a middle initial"}
+{"id":"date-001","text":"Дата рождения: 12.05.1990","expect_types":["BIRTH_DATE"],"note":"dd.mm.yyyy"}
+{"id":"date-002","text":"дата рождения 12/05/1990","expect_types":["BIRTH_DATE"],"note":"slash separator"}
+{"id":"date-003","text":"Д.Р. 12-05-1990","expect_types":["BIRTH_DATE"],"note":"abbreviated anchor, dash separator"}
+{"id":"date-004","text":"дата рождения 12 05 1990","expect_types":["BIRTH_DATE"],"note":"space separated"}
+{"id":"date-005","text":"дата рождения 12.05.90","expect_types":["BIRTH_DATE"],"note":"two digit year"}
+{"id":"date-006","text":"дата рождения 05/25/1990","expect_types":["BIRTH_DATE"],"note":"spec 4.2: mm.dd.yyyy, resolved by day above 12"}
+{"id":"date-007","text":"дата рождения 1990.12.05","expect_types":["BIRTH_DATE"],"note":"spec 4.2: yyyy.mm.dd"}
+{"id":"date-008","text":"дата рождения 1990.25.12","expect_types":["BIRTH_DATE"],"note":"spec 4.2: yyyy.dd.mm"}
+{"id":"date-009","text":"Родился 12 мая 1990 года","expect_types":["BIRTH_DATE"],"note":"spec 4.2: month written as a word"}
+{"id":"date-010","text":"родилась 12 мая 1990 г.","expect_types":["BIRTH_DATE"],"note":"abbreviated year tail stays outside the span"}
+{"id":"date-011","text":"Дата рождения: двенадцатое мая 1990 года","expect_types":["BIRTH_DATE"],"note":"spec 4.2: whole date in words"}
+{"id":"date-012","text":"Дата рождения: двадцать первое мая 1990 года","expect_types":["BIRTH_DATE"],"note":"compound ordinal in words"}
+{"id":"date-013","text":"Клиент 1990 г.р. обратился повторно.","expect_types":["BIRTH_DATE"],"note":"bare year of birth"}
+{"id":"date-014","text":"1990 года рождения, обратился впервые.","expect_types":["BIRTH_DATE"],"note":"bare year, long construction"}
+{"id":"date-015","text":"Паспорт выдан 20.06.2015","expect_types":["PASSPORT_ISSUE_DATE"],"note":"issue date anchor"}
+{"id":"date-016","text":"Дата выдачи 20.06.2015, код подразделения 770-001","expect_types":["PASSPORT_ISSUE_DATE","SUBDIVISION_CODE"],"note":"issue date next to subdivision code"}
+{"id":"date-017","text":"ДАТА РОЖДЕНИЯ 25.05.1990","expect_types":["BIRTH_DATE"],"note":"uppercase anchor"}
+{"id":"date-018","text":"Родился 12 МАЯ 1990","expect_types":["BIRTH_DATE"],"note":"uppercase month name"}
+{"id":"date-019","text":"Дата рождения 29.02.2000","expect_types":["BIRTH_DATE"],"note":"leap day is a real date"}
+{"id":"date-020","text":"Дата рождения 01.01.1980, паспорт выдан 02.02.2010","expect_types":["BIRTH_DATE","PASSPORT_ISSUE_DATE"],"note":"two dates, two different categories"}
+{"id":"date-021","text":"паспорт выдан 12 января 2015 года","expect_types":["PASSPORT_ISSUE_DATE"],"note":"issue date with a textual month"}
+{"id":"date-022","text":"Клиент Пётр родился двенадцатое мая 1990 года в Москве.","expect_types":["BIRTH_DATE"],"note":"spelled out date inside a sentence"}
+{"id":"pass-001","text":"паспорт 4509 123456","expect_types":["PASSPORT"],"note":"series and number separated by a space"}
+{"id":"pass-002","text":"паспорт 4509123456","expect_types":["PASSPORT"],"note":"contiguous ten digits"}
+{"id":"pass-003","text":"паспорт: 45 09 123456","expect_types":["PASSPORT"],"note":"series written as two pairs"}
+{"id":"pass-004","text":"паспорт 45 09 № 123456","expect_types":["PASSPORT"],"note":"numero sign between the groups"}
+{"id":"pass-005","text":"серия 4509 номер 123456","expect_types":["PASSPORT"],"note":"spec: separating words серия/номер stay outside the spans"}
+{"id":"pass-006","text":"серия 45 09 номер 123456","expect_types":["PASSPORT"],"note":"separating words with a split series"}
+{"id":"pass-007","text":"с. 4509 н. 123456","expect_types":["PASSPORT"],"note":"abbreviated separating words"}
+{"id":"pass-008","text":"ПАСПОРТ 4509 123456","expect_types":["PASSPORT"],"note":"uppercase anchor"}
+{"id":"pass-009","text":"паспорт 4509-123456","expect_types":["PASSPORT"],"note":"hyphen separator"}
+{"id":"pass-010","text":"документ, удостоверяющий личность: 4509 123456","expect_types":["PASSPORT"],"note":"long anchor phrase"}
+{"id":"pass-011","text":"Клиент предъявил паспорт 4509 123456 и ушёл.","expect_types":["PASSPORT"],"note":"inside a sentence"}
+{"id":"pass-012","text":"паспорт РФ 4509 № 123456","expect_types":["PASSPORT"],"note":"country marker between anchor and number"}
+{"id":"pass-013","text":"код подразделения 770-001","expect_types":["SUBDIVISION_CODE"],"note":"dashed subdivision code"}
+{"id":"pass-014","text":"к/п 770-001","expect_types":["SUBDIVISION_CODE"],"note":"slash abbreviation"}
+{"id":"pass-015","text":"подразделение 770001","expect_types":["SUBDIVISION_CODE"],"note":"six digits, no dash"}
+{"id":"pass-016","text":"Паспорт выдан ОВД Тверского района города Москвы, дата выдачи 01.01.2010","expect_types":["PASSPORT_ISSUER","PASSPORT_ISSUE_DATE"],"note":"issuing authority plus issue date"}
+{"id":"pass-017","text":"выдан ГУ МВД России по г. Москве","expect_types":["PASSPORT_ISSUER"],"note":"ministry issuer"}
+{"id":"pass-018","text":"кем выдан: УФМС России по Московской области в Басманном районе","expect_types":["PASSPORT_ISSUER"],"note":"long issuer with a region"}
+{"id":"pass-019","text":"Выдан Отделом УФМС России по г. Санкт-Петербургу.","expect_types":["PASSPORT_ISSUER"],"note":"issuer in the instrumental case"}
+{"id":"pass-020","text":"выдан ОВД Басманного района код подразделения 770-001","expect_types":["PASSPORT_ISSUER","SUBDIVISION_CODE"],"note":"issuer must not swallow the subdivision code"}
+{"id":"pass-021","text":"место рождения: г. Москва","expect_types":["BIRTH_PLACE"],"note":"city abbreviation"}
+{"id":"pass-022","text":"Уроженец города Казани","expect_types":["BIRTH_PLACE"],"note":"full word city"}
+{"id":"pass-023","text":"родился в с. Ивановка Тульской области","expect_types":["BIRTH_PLACE"],"note":"village with a region"}
+{"id":"pass-024","text":"место рождения дер. Малые Вязёмы","expect_types":["BIRTH_PLACE"],"note":"hamlet with a two word name"}
+{"id":"pass-025","text":"уроженка г. Твери","expect_types":["BIRTH_PLACE"],"note":"female form of the anchor"}
+{"id":"pass-026","text":"гражданство РФ","expect_types":["CITIZENSHIP"],"note":"abbreviation"}
+{"id":"pass-027","text":"гражданин Российской Федерации","expect_types":["CITIZENSHIP"],"note":"two word country name"}
+{"id":"pass-028","text":"ГРАЖДАНСТВО РФ, ПАСПОРТ 4509 123456, КОД ПОДРАЗДЕЛЕНИЯ 770-001","expect_types":["CITIZENSHIP","PASSPORT","SUBDIVISION_CODE"],"note":"all caps passport block"}
+{"id":"doc-001","text":"Водительское удостоверение 9902 123456 выдано в 2019 году.","expect_types":["DRIVER_LICENSE"],"note":"licence with a grouped series"}
+{"id":"doc-002","text":"в/у 99 02 123456","expect_types":["DRIVER_LICENSE"],"note":"slash abbreviation"}
+{"id":"doc-003","text":"Водительские права 9902123456.","expect_types":["DRIVER_LICENSE"],"note":"contiguous ten digits"}
+{"id":"doc-004","text":"ВОДИТЕЛЬСКОЕ УДОСТОВЕРЕНИЕ 9902 123456","expect_types":["DRIVER_LICENSE"],"note":"uppercase anchor"}
+{"id":"doc-005","text":"Водительское удостоверение АБ 123456","expect_types":["DRIVER_LICENSE"],"note":"pre-2011 cyrillic series"}
+{"id":"doc-006","text":"СНИЛС 112-233-445 95 подтверждён.","expect_types":["SNILS"],"note":"grouped snils with a valid checksum"}
+{"id":"doc-007","text":"Страховое свидетельство 112-233-445-95","expect_types":["SNILS"],"note":"fully dashed snils"}
+{"id":"doc-008","text":"Страховой номер 112-233-445 96","expect_types":["SNILS"],"note":"anchored snils with a wrong checksum"}
+{"id":"doc-009","text":"Загранпаспорт 75 1234567 действителен.","expect_types":["FOREIGN_PASSPORT"],"note":"foreign passport series and number"}
+{"id":"doc-010","text":"Данные заграничного паспорта 751234567","expect_types":["FOREIGN_PASSPORT"],"note":"contiguous foreign passport"}
+{"id":"doc-011","text":"Свидетельство о рождении II-МЮ 123456 выдано ЗАГС.","expect_types":["BIRTH_CERTIFICATE"],"note":"roman series plus cyrillic sub-series"}
+{"id":"doc-012","text":"Военный билет АБ 1234567 предъявлен.","expect_types":["MILITARY_ID"],"note":"military id"}
+{"id":"doc-013","text":"Вид на жительство 1234567 продлён.","expect_types":["RESIDENCE_PERMIT"],"note":"residence permit number"}
+{"id":"doc-014","text":"Полис ОМС 1234 5678 9012 3456 действует до конца года.","expect_types":["OMS_POLICY"],"note":"sixteen digit policy that must not be read as a card"}
+{"id":"addr-001","text":"Клиент проживает по адресу: г. Москва, ул. Ленина, д. 5, кв. 12","expect_types":["CITY","STREET","HOUSE","APARTMENT"],"note":"full address behind an anchor"}
+{"id":"addr-002","text":"Индекс 101000, г. Санкт-Петербург, наб. реки Фонтанки, д. 12А","expect_types":["POSTAL_CODE","CITY","STREET","HOUSE"],"note":"postal code, hyphenated city, multi-word street"}
+{"id":"addr-003","text":"Доставить по адресу: Ленинский проспект, д. 32","expect_types":["STREET","HOUSE"],"note":"street type on the right of the name"}
+{"id":"addr-004","text":"Адрес: ул. Мира, д. 5 корп. 2","expect_types":["STREET","HOUSE"],"note":"building plus corpus"}
+{"id":"addr-005","text":"Адрес: Россия, г. Казань, ул. Баумана, д. 3","expect_types":["COUNTRY","CITY","STREET","HOUSE"],"note":"country inside an address context"}
+{"id":"addr-006","text":"Адрес доставки: ул. Профсоюзная, д. 10, офис 501","expect_types":["STREET","HOUSE","APARTMENT"],"note":"office counts as an apartment"}
+{"id":"addr-007","text":"г. Химки, улица Пушкина, д. 4","expect_types":["CITY","STREET","HOUSE"],"note":"street named after a poet, masked because of its neighbours"}
+{"id":"addr-008","text":"Зарегистрирован: дер. Гадюкино, д. 7","expect_types":["CITY","HOUSE"],"note":"village marker"}
+{"id":"addr-009","text":"АДРЕС: Г. КАЗАНЬ, УЛ. БАУМАНА, Д. 3","expect_types":["CITY","STREET","HOUSE"],"note":"all caps address"}
+{"id":"addr-010","text":"адрес: г. тверь, ул. мира, д. 3","expect_types":["CITY","STREET","HOUSE"],"note":"all lower case address"}
+{"id":"addr-011","text":"Адрес: Тверская 12","expect_types":["ADDRESS"],"note":"single opaque address span"}
+{"id":"addr-012","text":"Клиент был в отделении, проживает по адресу: г. Омск, ул. Мира, д. 2","expect_types":["CITY","STREET","HOUSE"],"note":"bank premises mentioned, client address still masked"}
+{"id":"addr-013","text":"Проживает по адресу: г. Тверь, ул. Мира, д. 3, кв. 45","expect_types":["CITY","STREET","HOUSE","APARTMENT"],"note":"anchored four component address"}
+{"id":"addr-014","text":"Регистрация: 125009, г. Москва, Тверская улица, д. 7, кв. 3","expect_types":["POSTAL_CODE","CITY","STREET","HOUSE","APARTMENT"],"note":"postal code first, street type on the right"}
+{"id":"contact-001","text":"Мой адрес ivan.petrov@mail.ru для связи.","expect_types":["EMAIL"],"note":"dotted local part"}
+{"id":"contact-002","text":"Пишите на ivan@mail.ru.","expect_types":["EMAIL"],"note":"trailing full stop stays outside the span"}
+{"id":"contact-003","text":"Контакт: IVAN.PETROV@MAIL.RU","expect_types":["EMAIL"],"note":"uppercase email"}
+{"id":"contact-004","text":"дубль на i-petrov+bank@sub.example.co.uk, спасибо","expect_types":["EMAIL"],"note":"plus tag and a multi-level domain"}
+{"id":"contact-005","text":"почта: ivanov@почта.рф","expect_types":["EMAIL"],"note":"internationalised domain"}
+{"id":"contact-006","text":"Телефон +7 916 123-45-67 рабочий.","expect_types":["PHONE"],"note":"international format with groups"}
+{"id":"contact-007","text":"тел. +7(916)123-45-67","expect_types":["PHONE"],"note":"parenthesised area code"}
+{"id":"contact-008","text":"мобильный 8 916 123 45 67","expect_types":["PHONE"],"note":"national prefix, space separated"}
+{"id":"contact-009","text":"номер 89161234567 основной","expect_types":["PHONE"],"note":"eleven digits, no separators"}
+{"id":"contact-010","text":"Звоните (916) 123-45-67 в будни.","expect_types":["PHONE"],"note":"ten digits without a country prefix"}
+{"id":"contact-011","text":"контактный 916-123-45-67","expect_types":["PHONE"],"note":"fully dashed ten digit number"}
+{"id":"contact-012","text":"ivan@mail.ru, тел +7 916 123-45-67","expect_types":["EMAIL","PHONE"],"note":"two contact channels in one line"}
+{"id":"fin-001","text":"Оплата картой 4111 1111 1111 1111 прошла.","expect_types":["CARD_NUMBER"],"note":"luhn valid, grouped"}
+{"id":"fin-002","text":"Карта 5500005555555559 заблокирована.","expect_types":["CARD_NUMBER"],"note":"luhn valid, contiguous"}
+{"id":"fin-003","text":"Списание с 4111-1111-1111-1111 отменено.","expect_types":["CARD_NUMBER"],"note":"dashed groups"}
+{"id":"fin-004","text":"Оплата картой 3782 822463 10005 принята.","expect_types":["CARD_NUMBER"],"note":"fifteen digit amex grouping"}
+{"id":"fin-005","text":"НОМЕР КАРТЫ 4111 1111 1111 1112","expect_types":["CARD_NUMBER"],"note":"anchored but not luhn valid, uppercase"}
+{"id":"fin-006","text":"Выпущена карта 2200 0000 0000 0004.","expect_types":["CARD_NUMBER"],"note":"mir bin"}
+{"id":"fin-007","text":"ИНН 7707083893 указан в договоре.","expect_types":["INN"],"note":"ten digit legal entity inn"}
+{"id":"fin-008","text":"ИНН 770708389324 подтверждён.","expect_types":["INN"],"note":"twelve digit personal inn"}
+{"id":"fin-009","text":"Идентификационный номер налогоплательщика 7707083893.","expect_types":["INN"],"note":"long anchor phrase"}
+{"id":"fin-010","text":"Расчётный счёт 40702810900000012345 в банке.","expect_types":["BANK_ACCOUNT"],"note":"twenty digit account"}
+{"id":"fin-011","text":"р/с 40702810900000012345","expect_types":["BANK_ACCOUNT"],"note":"abbreviated anchor"}
+{"id":"fin-012","text":"Счет 4070 2810 9000 0001 2345 открыт.","expect_types":["BANK_ACCOUNT"],"note":"account written in groups of four"}
+{"id":"fin-013","text":"IBAN GB82 WEST 1234 5698 7654 32 действует.","expect_types":["BANK_ACCOUNT"],"note":"iban with a letter block"}
+{"id":"fin-014","text":"Перевод на DE89370400440532013000 отправлен.","expect_types":["BANK_ACCOUNT"],"note":"contiguous german iban"}
+{"id":"fin-015","text":"Карта 4111 1111 1111 1111, CVV 123.","expect_types":["CARD_NUMBER","CVV"],"note":"cvv is personal data only next to a card"}
+{"id":"fin-016","text":"Карта 4111 1111 1111 1111, ПИН-код 1234.","expect_types":["CARD_NUMBER","PIN"],"note":"spec example: pin next to a card"}
+{"id":"fin-017","text":"Карта 4111 1111 1111 1111, код безопасности карты: 4567","expect_types":["CARD_NUMBER","CVV"],"note":"four digit cvv"}
+{"id":"fin-018","text":"Карта 4111 1111 1111 1111, CVV 123, ИНН 770708389324.","expect_types":["CARD_NUMBER","CVV","INN"],"note":"three financial categories in one line"}
+{"id":"fin-019","text":"карта 4111 1111 1111 1111, pin 123456 задан клиентом","expect_types":["CARD_NUMBER","PIN"],"note":"latin pin anchor, six digits"}
+{"id":"fin-020","text":"КАРТА 4276 1600 1234 5678, CVV 456, ДЕРЖАТЕЛЬ: IVAN IVANOV","expect_types":["CARD_NUMBER","CVV","CARD_HOLDER"],"note":"all caps card block"}
+{"id":"mix-001","text":"Клиент Иванов Иван Иванович, дата рождения 12.05.1990, паспорт 4509 123456, выдан ОВД Тверского района города Москвы, код подразделения 770-001.","expect_types":["FIO","BIRTH_DATE","PASSPORT","PASSPORT_ISSUER","SUBDIVISION_CODE"],"note":"full passport record"}
+{"id":"mix-002","text":"Иванов Иван Иванович, телефон +7 916 123-45-67, почта ivan.ivanov@mail.ru, карта 4111 1111 1111 1111.","expect_types":["FIO","PHONE","EMAIL","CARD_NUMBER"],"note":"identity plus contacts plus card"}
+{"id":"mix-003","text":"Петров Пётр Петрович проживает по адресу: г. Москва, ул. Ленина, д. 5, кв. 12, телефон 8 916 123 45 67.","expect_types":["FIO","CITY","STREET","HOUSE","APARTMENT","PHONE"],"note":"name, address and phone"}
+{"id":"mix-004","text":"Заявитель: Сидорова Анна Сергеевна, гражданство РФ, место рождения: г. Тула, дата рождения 01.01.1980.","expect_types":["FIO","CITIZENSHIP","BIRTH_PLACE","BIRTH_DATE"],"note":"questionnaire block"}
+{"id":"mix-005","text":"Водительское удостоверение 9902 123456 на имя Иванова Ивана Ивановича, телефон +7 916 123-45-67.","expect_types":["DRIVER_LICENSE","FIO","PHONE"],"note":"licence bound to a name"}
+{"id":"mix-006","text":"СНИЛС 112-233-445 95, ИНН 770708389324, расчётный счёт 40702810900000012345.","expect_types":["SNILS","INN","BANK_ACCOUNT"],"note":"three identifier numbers in a row"}
+{"id":"mix-007","text":"Прошу перевести средства Иванову Ивану Ивановичу на карту 4111 1111 1111 1111, телефон получателя 8 916 123 45 67.","expect_types":["FIO","CARD_NUMBER","PHONE"],"note":"transfer request"}
+{"id":"mix-008","text":"Анкета: Иванов Иван Иванович, 12.05.1990 года рождения, паспорт серия 4509 номер 123456, адрес: г. Казань, ул. Баумана, д. 3, email ivan@mail.ru.","expect_types":["FIO","BIRTH_DATE","PASSPORT","CITY","STREET","HOUSE","EMAIL"],"note":"long questionnaire with separating words"}
+{"id":"mix-009","text":"КЛИЕНТ ИВАНОВ ИВАН ИВАНОВИЧ, ПАСПОРТ 4509 123456, ТЕЛЕФОН +7 916 123-45-67, КАРТА 4111 1111 1111 1111","expect_types":["FIO","PASSPORT","PHONE","CARD_NUMBER"],"note":"entirely uppercase record"}
+{"id":"mix-010","text":"клиент иванов иван иванович, паспорт 4509 123456, телефон +7 916 123-45-67, почта ivan@mail.ru","expect_types":["FIO","PASSPORT","PHONE","EMAIL"],"note":"entirely lowercase record"}
+{"id":"mix-011","text":"Заявление на выпуск карты. Заявитель Иванов Иван Иванович, дата рождения двенадцатое мая 1990 года, паспорт 4509 123456, выдан 20.06.2015 ГУ МВД России по г. Москве, проживает по адресу: г. Москва, ул. Ленина, д. 5, кв. 12. Контактный телефон +7 916 123-45-67, электронная почта ivan.ivanov@mail.ru.","expect_types":["FIO","BIRTH_DATE","PASSPORT","PASSPORT_ISSUE_DATE","PASSPORT_ISSUER","CITY","STREET","HOUSE","APARTMENT","PHONE","EMAIL"],"note":"long complex sentence, many categories"}
+{"id":"mix-012","text":"Уважаемый Иванов Иван Иванович!\n\nПо Вашему обращению от 12.05.2024 сообщаем, что карта 4111 1111 1111 1111 перевыпущена. Новый ПИН-код 1234 придёт отдельным сообщением на номер +7 916 123-45-67.\n\nОтделение банка на улице Ленина работает с 9 до 18. Если у Вас остались вопросы, напишите на support@alfabank.ru или позвоните по номеру 8 800 555 35 35.\n\nС уважением, отдел по работе с клиентами.","expect_types":["FIO","CARD_NUMBER","PIN","PHONE"],"note":"multi paragraph letter: client data masked, bank contacts untouched"}
+{"id":"mix-013","text":"Протокол встречи.\n\nПрисутствовали: Иванов Иван Иванович (паспорт 4509 123456) и Петрова Мария Сергеевна (ИНН 770708389324).\n\nОбсуждался договор 12-05-1990 и сумма 450000 рублей. Версия документа 1.2.30.\n\nСледующая встреча назначена на 2024 год в отделении на улице Тверская, д. 7.","expect_types":["FIO","PASSPORT","INN"],"note":"multi paragraph minutes with numeric noise that must survive"}
+{"id":"mix-014","text":"Запрос в службу поддержки: меня зовут Иванов И.И., мой загранпаспорт 75 1234567, водительское удостоверение 9902 123456, проживаю по адресу: г. Тверь, ул. Мира, д. 3, кв. 45.","expect_types":["FIO","FOREIGN_PASSPORT","DRIVER_LICENSE","CITY","STREET","HOUSE","APARTMENT"],"note":"two documents plus an address"}
+{"id":"mix-015","text":"Доверенность выдана Ивановым Иваном Ивановичем, паспорт серия 45 09 номер 123456, код подразделения 770-001, дата выдачи 20.06.2015, на имя Петрова Петра Петровича.","expect_types":["FIO","PASSPORT","SUBDIVISION_CODE","PASSPORT_ISSUE_DATE"],"note":"two names, separating words, subdivision code"}
+{"id":"mix-016","text":"Реквизиты для перевода: получатель Иванов Иван Иванович, счёт 40702810900000012345, ИНН 7707083893, телефон +7 916 123-45-67, e-mail ivan@mail.ru.","expect_types":["FIO","BANK_ACCOUNT","INN","PHONE","EMAIL"],"note":"payment details block"}
+{"id":"neg-001","text":"Александр Пушкин — русский поэт.","expect_types":[],"note":"spec: a poet is not a bank client"}
+{"id":"neg-002","text":"Мы читали поэта Александра Пушкина в школе.","expect_types":[],"note":"spec: famous person in a literary context"}
+{"id":"neg-003","text":"Стихи Александра Пушкина изучают в школе.","expect_types":[],"note":"famous person behind a noun that looks like a surname stem"}
+{"id":"neg-004","text":"Библиотека имени Пушкина закрыта на ремонт.","expect_types":[],"note":"institution named after a person"}
+{"id":"neg-005","text":"Памятник Пушкину стоит на улице Пушкина.","expect_types":[],"note":"monument and a street with no address neighbours"}
+{"id":"neg-006","text":"Адрес отделения банка: г. Москва, ул. Тверская, д. 7","expect_types":[],"note":"spec: bank premises are not client data"}
+{"id":"neg-007","text":"Ближайший банкомат: г. Тула, ул. Советская, д. 1","expect_types":[],"note":"atm location is bank premises"}
+{"id":"neg-008","text":"Отделение банка на улице Ленина работает с 9 до 18.","expect_types":[],"note":"branch opening hours"}
+{"id":"neg-009","text":"Звоните 8 800 555 35 35 круглосуточно.","expect_types":[],"note":"spec: toll free bank number"}
+{"id":"neg-010","text":"Телефон банка 900 для смс.","expect_types":[],"note":"short service number"}
+{"id":"neg-011","text":"Единый номер 112, звоните с мобильного.","expect_types":[],"note":"emergency number"}
+{"id":"neg-012","text":"Пишите на support@alfabank.ru","expect_types":[],"note":"spec: corporate mailbox of the bank"}
+{"id":"neg-013","text":"info@example.com — общий ящик.","expect_types":[],"note":"role mailbox, not a person"}
+{"id":"neg-014","text":"Сумма перевода 450000 рублей зачислена на счёт.","expect_types":[],"note":"six digit amount must not become a subdivision code"}
+{"id":"neg-015","text":"Код подтверждения 123456 отправлен.","expect_types":[],"note":"one time code is not personal data"}
+{"id":"neg-016","text":"Договор 12-05-1990 подписан сторонами.","expect_types":[],"note":"contract number shaped like a date"}
+{"id":"neg-017","text":"Версия 1.2.30 выпущена в продакшн.","expect_types":[],"note":"semantic version shaped like a date"}
+{"id":"neg-018","text":"Заказ 01.02.1999 оформлен.","expect_types":[],"note":"order number shaped like a date"}
+{"id":"neg-019","text":"Отчёт за 2024 год готов.","expect_types":[],"note":"bare year is not a birth date"}
+{"id":"neg-020","text":"Сумма 1 000 000 рублей перечислена.","expect_types":[],"note":"grouped amount is not a card or an account"}
+{"id":"neg-021","text":"Артикул 1234567890123456 в каталоге.","expect_types":[],"note":"sixteen digits without a card anchor"}
+{"id":"neg-022","text":"Сервер 192.168.1.10 недоступен.","expect_types":[],"note":"ip address is not a date"}
+{"id":"neg-023","text":"Время 12:05, начало встречи.","expect_types":[],"note":"time of day"}
+{"id":"neg-024","text":"Номер заказа 7707083893 уточните у оператора.","expect_types":[],"note":"ten digits without an inn anchor"}
+{"id":"neg-025","text":"Значение 40702810900000012345 записано в журнал.","expect_types":[],"note":"twenty digits without an account anchor"}
+{"id":"neg-026","text":"Площадь помещения 45 кв. м, потолки высокие.","expect_types":[],"note":"square metres are not an apartment"}
+{"id":"neg-027","text":"Товары поставляются в Казахстан и обратно.","expect_types":[],"note":"country outside an address context"}
+{"id":"neg-028","text":"Рядом строится дом культуры и новая школа.","expect_types":[],"note":"дом is a building only in front of a number"}
+{"id":"neg-029","text":"Клиенту предложена квартира-студия в новом доме.","expect_types":[],"note":"квартира-студия is a term, not an address"}
+{"id":"neg-030","text":"В 2020 г. Иванов открыл вклад.","expect_types":[],"note":"год abbreviation must not be read as город"}
+{"id":"neg-031","text":"Заказ 9161234567 оформлен.","expect_types":[],"note":"ten digits without a phone cue"}
+{"id":"neg-032","text":"Сайт mail.ru открывается медленно.","expect_types":[],"note":"domain without an at sign"}
+{"id":"neg-033","text":"Отчёт сдан вовремя, платёж прошёл успешно.","expect_types":[],"note":"no personal data at all"}
+{"id":"neg-034","text":"Всего 123 штуки на складе, скидка 12 процентов.","expect_types":[],"note":"three digits are not a cvv without a card"}
+{"id":"neg-035","text":"Оплата картой VISA CLASSIC прошла успешно.","expect_types":[],"note":"card product name is not a holder name"}
+{"id":"hard-001","text":"Оформите доставку на Кузнецову Марию Петровну, телефон 8-916-123-45-67.","expect_types":["FIO","PHONE"],"note":"female name in the accusative, fully dashed phone"}
+{"id":"hard-002","text":"ФИО: Смирнов Алексей Викторович","expect_types":["FIO"],"note":"field label ФИО"}
+{"id":"hard-003","text":"Прошу зачислить средства на счёт Ковалёвой Ольги Ивановны.","expect_types":["FIO"],"note":"female name in the genitive, letter ё"}
+{"id":"hard-004","text":"Паспортные данные: 40 03 654321, выдан 15.03.2004.","expect_types":["PASSPORT","PASSPORT_ISSUE_DATE"],"note":"anchor in the plural, split series"}
+{"id":"hard-005","text":"Дата рождения 07.11.1985 г., место рождения: г. Нижний Новгород","expect_types":["BIRTH_DATE","BIRTH_PLACE"],"note":"two word city name as a birth place"}
+{"id":"hard-006","text":"e-mail для документов: a.kuznetsova@gmail.com","expect_types":["EMAIL"],"note":"latin e-mail anchor with a hyphen"}
+{"id":"hard-007","text":"Карта получателя 5469 3800 1234 5678 подтверждена.","expect_types":["CARD_NUMBER"],"note":"anchor separated from the number by a noun"}
+{"id":"hard-008","text":"ИНН 502704890956, СНИЛС 123-456-789 64","expect_types":["INN","SNILS"],"note":"twelve digit inn next to a snils"}
+{"id":"hard-009","text":"Адрес регистрации: 630099, Новосибирск, ул. Ленина, д. 12, кв. 34","expect_types":["POSTAL_CODE","CITY","STREET","HOUSE","APARTMENT"],"note":"city without the г. marker"}
+{"id":"hard-010","text":"Клиент Фёдоров Дмитрий Андреевич, 15 марта 1979 года рождения.","expect_types":["FIO","BIRTH_DATE"],"note":"textual month with the рождения tail"}
+{"id":"hard-011","text":"Телефон для связи: 8(495)123-45-67 добавочный 101","expect_types":["PHONE"],"note":"extension must not be swallowed"}
+{"id":"hard-012","text":"Гражданство: Республика Беларусь","expect_types":["CITIZENSHIP"],"note":"two word country other than Russia"}
+{"id":"hard-013","text":"Плательщик Николаев Сергей Олегович, ИНН 771234567890, карта 4276 5500 1234 5678, CVV 789.","expect_types":["FIO","INN","CARD_NUMBER","CVV"],"note":"payment record written from scratch"}
+{"id":"hard-014","text":"Прошу изменить контакты: новый телефон +7 903 555-11-22, новая почта o.kovaleva@yandex.ru, адрес: г. Пермь, ул. Сибирская, д. 8, кв. 19.","expect_types":["PHONE","EMAIL","CITY","STREET","HOUSE","APARTMENT"],"note":"change request with three contact kinds"}
+{"id":"neg-036","text":"Курс доллара вырос до 95 рублей за 2024 год.","expect_types":[],"note":"rate and a year are not personal data"}
+{"id":"neg-037","text":"Идентификатор транзакции 4509123456 не найден.","expect_types":[],"note":"ten digits without a passport anchor"}
+{"id":"neg-038","text":"Согласно статье 152 ФЗ персональные данные подлежат защите.","expect_types":[],"note":"law article number"}
+{"id":"neg-039","text":"Лимит по карте увеличен до 300000 рублей с 01.01.2025.","expect_types":[],"note":"limit and an effective date are product terms"}
+{"id":"neg-040","text":"Режим работы отделения: понедельник — пятница, с 09:00 до 20:00.","expect_types":[],"note":"opening hours"}

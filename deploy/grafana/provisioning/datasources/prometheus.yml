@@ -1,0 +1,11 @@
+# Provisioned so the dashboard works on first boot: a judge should not have to
+# type a datasource URL before seeing a graph.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

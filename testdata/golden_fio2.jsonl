@@ -1,0 +1,25 @@
+{"id":"fio2-001","text":"Заемщик Салтыков-Щедрин Михаил Евграфович подтвердил свои данные.","expect_types":["FIO"],"note":"hyphenated famous surname behind a strong client anchor"}
+{"id":"fio2-002","text":"Заявитель: Салтыков-Щедрин Михаил Евграфович","expect_types":["FIO"],"note":"same, anchor separated by a colon"}
+{"id":"fio2-003","text":"Заёмщик Лермонтов Михаил Юрьевич внес очередной платеж.","expect_types":["FIO"],"note":"strong anchor in the ё spelling"}
+{"id":"fio2-004","text":"Поручитель Гагарин Юрий Алексеевич подписал договор поручительства.","expect_types":["FIO"],"note":"client whose surname belongs to a cosmonaut"}
+{"id":"fio2-005","text":"Вкладчик Пушкин Александр Сергеевич закрыл вклад досрочно.","expect_types":["FIO"],"note":"client whose full name matches a poet"}
+{"id":"fio2-006","text":"Гражданка Ахматова Анна Андреевна обратилась за выпиской.","expect_types":["FIO"],"note":"female strong anchor over a famous name"}
+{"id":"fio2-007","text":"Наследник Гагарин Юрий Алексеевич вступил в права.","expect_types":["FIO"],"note":"inheritance anchor over the public-figure veto"}
+{"id":"fio2-008","text":"Счет оформлен на Пушкина Александра Сергеевича.","expect_types":["FIO"],"note":"multi-word strong anchor оформлен на"}
+{"id":"fio2-009","text":"Доверенность на имя Лермонтова Михаила Юрьевича оформлена.","expect_types":["FIO"],"note":"multi-word strong anchor на имя"}
+{"id":"fio2-010","text":"ФИО: Гагарин Юрий Алексеевич","expect_types":["FIO"],"note":"form label as a strong anchor"}
+{"id":"fio2-011","text":"Ф.И.О. Пушкин Александр Сергеевич","expect_types":["FIO"],"note":"dotted form label the tokenizer splits into letters"}
+{"id":"fio2-012","text":"Клиентка Иванова-Петрова Анна Сергеевна открыла вклад.","expect_types":["FIO"],"note":"female hyphenated double surname"}
+{"id":"fio2-013","text":"Клиент иванов обратился за выпиской по счету.","expect_types":["FIO"],"note":"lower-case surname after a strong anchor in mixed-case text"}
+{"id":"fio2-014","text":"Заемщик петров подтвердил получение средств.","expect_types":["FIO"],"note":"same, borrower anchor"}
+{"id":"fio2-015","text":"Счет оформлен на иванова.","expect_types":["FIO"],"note":"lower-case surname after a multi-word strong anchor"}
+{"id":"fio2-016","text":"В школьную программу входит стихотворение Александра Пушкина.","expect_types":[],"note":"poet mentioned as a poet, no anchor at all"}
+{"id":"fio2-017","text":"Роман Льва Николаевича Толстого Война и мир известен во всем мире.","expect_types":[],"note":"writer behind a literary marker"}
+{"id":"fio2-018","text":"Библиотека имени А. С. Пушкина открыта для читателей ежедневно.","expect_types":[],"note":"institution named after a poet"}
+{"id":"fio2-019","text":"Юрий Алексеевич Гагарин совершил первый в истории полет в космос.","expect_types":[],"note":"public figure with nothing to the left"}
+{"id":"fio2-020","text":"Памятник Пушкину А.С. установлен в историческом центре.","expect_types":[],"note":"monument marker keeps the veto"}
+{"id":"fio2-021","text":"Клиент упомянул стихотворение Александра Пушкина на встрече.","expect_types":[],"note":"strong anchor four words away is not adjacency"}
+{"id":"fio2-022","text":"Менеджер обсудил стихотворение Александра Пушкина с коллегами.","expect_types":[],"note":"bank-side job title is not a strong anchor"}
+{"id":"fio2-023","text":"Отправитель документов и договоров не указан.","expect_types":[],"note":"genitive plural after a strong anchor is not a lower-case surname"}
+{"id":"fio2-024","text":"Владелец активов и вкладов пока не установлен.","expect_types":[],"note":"same trap with владелец"}
+{"id":"fio2-025","text":"Заемщик подтвердил получение средств и документов.","expect_types":[],"note":"strong anchor with no name after it"}

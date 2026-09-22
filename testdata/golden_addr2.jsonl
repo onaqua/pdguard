@@ -1,0 +1,26 @@
+{"id":"addr2-001","text":"Офис расположен на улице Александра Пушкина, дом 10.","expect_types":[],"note":"organisation as the sentence subject: premises, not a client address"}
+{"id":"addr2-002","text":"Отделение находится по адресу г. Москва, ул. Каланчёвская, д. 27.","expect_types":[],"note":"branch as the subject, address behind по адресу"}
+{"id":"addr2-003","text":"Филиал работает на улице Ленина, дом 3.","expect_types":[],"note":"branch as the subject"}
+{"id":"addr2-004","text":"Банкомат установлен в доме 5 по улице Мира.","expect_types":[],"note":"ATM as the subject, house before street"}
+{"id":"addr2-005","text":"Магазин открылся на проспекте Мира, дом 7.","expect_types":[],"note":"shop as the subject"}
+{"id":"addr2-006","text":"Наш офис переехал на улицу Тверская, дом 12.","expect_types":[],"note":"possessive modifier before the organisation subject"}
+{"id":"addr2-007","text":"Головной офис расположен по адресу г. Москва, ул. Арбат, д. 1.","expect_types":[],"note":"adjective modifier before the organisation subject"}
+{"id":"addr2-008","text":"Пункт выдачи находится на улице Гагарина, дом 4.","expect_types":[],"note":"two-word organisation subject"}
+{"id":"addr2-009","text":"Склад расположен на улице Промышленной, дом 8.","expect_types":[],"note":"warehouse as the subject"}
+{"id":"addr2-010","text":"Юридический адрес: г. Москва, ул. Арбат, д. 1.","expect_types":[],"note":"a legal address is an organisation's by definition"}
+{"id":"addr2-011","text":"Фактический адрес организации: г. Казань, ул. Баумана, д. 3.","expect_types":[],"note":"actual address explicitly marked as the company's"}
+{"id":"addr2-012","text":"Дополнительный офис работает на улице Мира, дом 1.","expect_types":[],"note":"additional office as the subject"}
+{"id":"addr2-013","text":"Представительство открыто на улице Тверской, дом 11.","expect_types":[],"note":"representative office as the subject"}
+{"id":"addr2-014","text":"Шоурум переехал на улицу Садовую, дом 14.","expect_types":[],"note":"showroom as the subject"}
+{"id":"addr2-015","text":"Терминал установлен на улице Гоголя, дом 6.","expect_types":[],"note":"terminal as the subject"}
+{"id":"addr2-016","text":"Курьер доставил заказ на проспект Юрия Гагарина, дом 25.","expect_types":["STREET","HOUSE"],"note":"a delivery address is the client's; the subject is a courier, not premises"}
+{"id":"addr2-017","text":"Офис клиента находится на улице Ленина, дом 5.","expect_types":["STREET","HOUSE"],"note":"premises owned by a person stay personal data"}
+{"id":"addr2-018","text":"Магазин отправит заказ по адресу доставки: ул. Ленина, д. 7, кв. 9.","expect_types":["STREET","HOUSE","APARTMENT"],"note":"a personal anchor later in the sentence beats the organisation subject"}
+{"id":"addr2-019","text":"Фактический адрес: г. Казань, ул. Баумана, д. 3.","expect_types":["CITY","STREET","HOUSE"],"note":"without an owner word this heading is just as likely the client's"}
+{"id":"addr2-020","text":"Офис расположен на улице Александра Пушкина, дом 10. Клиент проживает на улице Мира, д. 3.","expect_types":["STREET","HOUSE"],"note":"suppression is bounded by the sentence, so the next sentence still masks"}
+{"id":"addr2-021","text":"Доставить в офис клиента: ул. Ленина, д. 4.","expect_types":["STREET","HOUSE"],"note":"an oblique office is never the subject"}
+{"id":"addr2-022","text":"Пункт 5 договора: доставка на улицу Ленина, дом 3.","expect_types":["STREET","HOUSE"],"note":"a bare пункт is a contract clause, not a pick-up point"}
+{"id":"addr2-023","text":"Адрес регистрации клиента: 119991, г. Москва, ул. Ленина, д. 5, кв. 12","expect_types":["POSTAL_CODE","CITY","STREET","HOUSE","APARTMENT"],"note":"full registration address behind an anchor"}
+{"id":"addr2-024","text":"Клиент проживает на улице Пушкина, д. 5.","expect_types":["STREET","HOUSE"],"note":"a street named after a famous person is still a client address"}
+{"id":"addr2-025","text":"Встретимся на станции метро Пушкинская завтра в полдень.","expect_types":[],"note":"a metro station is not an address"}
+{"id":"addr2-026","text":"Офис расположен по адресу: Тверская 12","expect_types":[],"note":"organisation subject also suppresses the opaque fallback span"}

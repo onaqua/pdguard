@@ -1,0 +1,14 @@
+# Minimal scrape configuration for the demo stack. Nothing here is required to
+# run pdguard: it is only used by `docker compose --profile obs up`.
+global:
+  # 5s rather than the usual 15s: a hackathon demo lasts minutes, and a judge
+  # should see the graph move while the load generator is still running.
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: pdguard
+    metrics_path: /metrics
+    static_configs:
+      # "pdguard" is the compose service name, resolved on the shared network.
+      - targets: ["pdguard:8080"]

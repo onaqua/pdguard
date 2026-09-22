@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pdguard — маскирование персональных данных</title>
+<style>
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; background: #f4f5f7; color: #1c1e21; }
+header { background: #1f2937; color: #fff; padding: 16px 24px; }
+header h1 { margin: 0; font-size: 20px; }
+header p { margin: 4px 0 0; opacity: .8; font-size: 13px; }
+main { max-width: 900px; margin: 24px auto; padding: 0 16px; }
+.card { background: #fff; border: 1px solid #e2e5e9; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 14px; }
+textarea { width: 100%; min-height: 120px; font-family: ui-monospace, "Cascadia Mono", monospace; font-size: 14px; padding: 10px; border: 1px solid #cbd2d9; border-radius: 6px; resize: vertical; }
+button { background: #2563eb; color: #fff; border: 0; border-radius: 6px; padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; }
+button:hover { background: #1d4ed8; }
+button.secondary { background: #6b7280; }
+button.secondary:hover { background: #4b5563; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.output { margin-top: 16px; }
+.output h3 { margin: 0 0 8px; font-size: 14px; }
+pre { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+.hits { margin-top: 12px; }
+.hits table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.hits th, .hits td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e2e5e9; }
+.hits th { background: #f8fafc; }
+.badge { display: inline-block; background: #eef2ff; color: #3730a3; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 600; }
+.status { font-size: 13px; margin-top: 8px; }
+.status.ok { color: #15803d; }
+.status.err { color: #b91c1c; }
+</style>
+</head>
+<body>
+<header>
+  <h1>pdguard — модуль безопасности персональных данных</h1>
+  <p>Демо-консоль. Введите текст, нажмите «Проверить» — найденные персональные данные будут подсвечены. Ничего не сохраняется.</p>
+</header>
+<main>
+  <div class="card">
+    <label for="payload">Текст для анализа</label>
+    <textarea id="payload" placeholder="Например: Клиент Иванов Иван Иванович, карта 4509 1234 5678 9012, почта ivanov@example.com."></textarea>
+    <div class="row">
+      <button id="run">Проверить</button>
+      <button id="clear" class="secondary">Очистить</button>
+    </div>
+    <div id="status" class="status"></div>
+  </div>
+  <div class="card output">
+    <h3>Найденные персональные данные</h3>
+    <div id="hits" class="hits"></div>
+  </div>
+  <div class="card output">
+    <h3>Ответ сервиса</h3>
+    <pre id="result">—</pre>
+  </div>
+</main>
+<script>
+(function () {
+  var payload = document.getElementById('payload');
+  var statusEl = document.getElementById('status');
+  var hitsEl = document.getElementById('hits');
+  var resultEl = document.getElementById('result');
+
+  function setStatus(text, ok) {
+    statusEl.textContent = text;
+    statusEl.className = 'status ' + (ok ? 'ok' : 'err');
+  }
+
+  function renderHits(data) {
+    if (!data || !data.spans || data.spans.length === 0) {
+      hitsEl.innerHTML = '<p>Персональные данные не найдены.</p>';
+      return;
+    }
+    var rows = data.spans.map(function (sp) {
+      return '<tr><td><span class="badge">' + escapeHtml(sp.type) + '</span></td>' +
+        '<td>' + sp.start + '…' + sp.end + '</td>' +
+        '<td>' + sp.len + '</td>' +
+        '<td>' + sp.conf.toFixed(2) + '</td>' +
+        '<td>' + escapeHtml(sp.src) + '</td></tr>';
+    }).join('');
+    hitsEl.innerHTML = '<table><thead><tr><th>Тип</th><th>Смещение</th><th>Длина</th><th>Уверенность</th><th>Детектор</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function run() {
+    var text = payload.value;
+    if (!text) {
+      setStatus('Введите текст для анализа.', false);
+      return;
+    }
+    setStatus('Анализ…', true);
+    fetch('/admin/detect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payload: text })
+    }).then(function (resp) {
+      return resp.json().then(function (data) {
+        return { ok: resp.ok, data: data };
+      });
+    }).then(function (res) {
+      if (!res.ok) {
+        setStatus('Ошибка сервиса: ' + (res.data && res.data.error ? res.data.error : 'неизвестная'), false);
+        return;
+      }
+      renderHits(res.data);
+      resultEl.textContent = JSON.stringify(res.data, null, 2);
+      setStatus('Найдено записей: ' + res.data.count, true);
+    }).catch(function (err) {
+      setStatus('Сетевая ошибка: ' + err.message, false);
+    });
+  }
+
+  document.getElementById('run').addEventListener('click', run);
+  document.getElementById('clear').addEventListener('click', function () {
+    payload.value = '';
+    hitsEl.innerHTML = '';
+    resultEl.textContent = '—';
+    setStatus('', true);
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+# Keep the build context tiny: everything the compiler does not read is a
+# layer-cache invalidation waiting to happen, and ds.pdf alone is 260 KB of
+# specification that must never end up inside a shipped image.
+
+# Version control and editor state
+.git
+.gitignore
+.github
+.idea
+.vscode
+*.swp
+*~
+
+# Build output (a host-built binary must never shadow the one we compile here)
+bin/
+dist/
+build/
+out/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.zip
+*.tar
+*.tar.gz
+
+# Go caches / vendored dependencies. pdguard has none, but an accidental
+# `go mod vendor` on a laptop must not silently change what gets compiled.
+vendor/
+.gocache/
+.gomodcache/
+
+# Datasets, fixtures and profiling artefacts — large and irrelevant to the build
+testdata/
+datasets/
+*.csv
+*.jsonl
+*.prof
+*.pprof
+coverage.out
+coverage.html
+
+# The task statement and anything derived from it
+ds.pdf
+ds.txt
+
+# Docs and deployment extras: not compiled, and changing a README should not
+# rebuild the binary
+docs/
+deploy/
+*.md
+Makefile
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
+scripts/
+.spec/
+.tmp/

@@ -1,0 +1,22 @@
+{"id": "doc2-dl-01", "text": "Водительское удостоверение серия 77 12 № 345678 категории B.", "expect_types": ["DRIVER_LICENSE"], "note": "series label and numero sign must not be read as a passport"}
+{"id": "doc2-dl-02", "text": "Водительское удостоверение серия 7712 номер 345678 действительно.", "expect_types": ["DRIVER_LICENSE"], "note": "spelled out labels between the two halves"}
+{"id": "doc2-dl-03", "text": "Водительское удостоверение 77 12 345678 предъявлено инспектору.", "expect_types": ["DRIVER_LICENSE"], "note": "bare digit groups"}
+{"id": "doc2-dl-04", "text": "Водительское удостоверение 7712 345678 изъято до решения суда.", "expect_types": ["DRIVER_LICENSE"], "note": "solid series"}
+{"id": "doc2-dl-05", "text": "Водительское удостоверение 77 12 N 345678 в материалах дела.", "expect_types": ["DRIVER_LICENSE"], "note": "latin numero sign between series and number"}
+{"id": "doc2-dl-06", "text": "Удостоверение водителя серия 77 12 № 345678 сдано.", "expect_types": ["DRIVER_LICENSE"], "note": "genitive form of the cue"}
+{"id": "doc2-dl-07", "text": "В/у серия 77 12 № 345678 выдано взамен утраченного.", "expect_types": ["DRIVER_LICENSE"], "note": "abbreviated cue"}
+{"id": "doc2-dl-08", "text": "Водительские права серия 77 12 номер 345678 просрочены.", "expect_types": ["DRIVER_LICENSE"], "note": "the licence called by its colloquial name"}
+{"id": "doc2-dl-09", "text": "Водительское удостоверение 77 АА 123456 старого образца принято.", "expect_types": ["DRIVER_LICENSE"], "note": "pre-2011 region series stays inside the span"}
+{"id": "doc2-pp-01", "text": "Паспорт серия 4509 номер 123456 предъявлен при открытии счета.", "expect_types": ["PASSPORT"], "note": "separating words, required by clause 4.2"}
+{"id": "doc2-pp-02", "text": "Серия 4509 номер 123456 записаны в анкету.", "expect_types": ["PASSPORT"], "note": "labelled halves without the word passport"}
+{"id": "doc2-pp-03", "text": "Паспорт 4509 123456 приложен к заявлению.", "expect_types": ["PASSPORT"], "note": "joined groups"}
+{"id": "doc2-pp-04", "text": "Паспорт 4509123456 указан в договоре.", "expect_types": ["PASSPORT"], "note": "solid ten digits with an anchor"}
+{"id": "doc2-pp-05", "text": "Паспорт: 45 09 123456 проверен сотрудником.", "expect_types": ["PASSPORT"], "note": "series written as two pairs"}
+{"id": "doc2-mix-01", "text": "Водительское удостоверение 9902 123456, паспорт 4509 123456 приложены.", "expect_types": ["DRIVER_LICENSE", "PASSPORT"], "note": "both documents in one clause keep their own categories"}
+{"id": "doc2-mix-02", "text": "Полис ОМС оформлен, паспорт серия 4509 номер 123456 проверен.", "expect_types": ["PASSPORT"], "note": "a nearer passport anchor outweighs the policy marker"}
+{"id": "doc2-mix-03", "text": "Водительские права утеряны. Паспорт 4509 123456 предъявлен.", "expect_types": ["PASSPORT"], "note": "the licence mention lives in the previous sentence"}
+{"id": "doc2-fp-01", "text": "Загранпаспорт серия 75 номер 1234567 оформлен в мае.", "expect_types": ["FOREIGN_PASSPORT"], "note": "foreign passport takes the same separating words"}
+{"id": "doc2-neg-01", "text": "Курьер доставил заказ 77 12 345678 в пункт выдачи.", "expect_types": [], "note": "an order number has no document cue at all"}
+{"id": "doc2-neg-02", "text": "Водительское удостоверение стоит 2000 рублей госпошлины.", "expect_types": [], "note": "the cue is there but the number is an amount"}
+{"id": "doc2-neg-03", "text": "Клиент назвал 4509 123456 в разговоре с оператором.", "expect_types": [], "note": "bare ten digits without any anchor"}
+{"id": "doc2-neg-04", "text": "Водительское удостоверение утеряно. Заказ 77 12 345678 отменен.", "expect_types": [], "note": "the cue is in another sentence and the number is an order"}

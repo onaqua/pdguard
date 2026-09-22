@@ -1,0 +1,50 @@
+{"id": "doc-x001", "text": "Водительское удостоверение 9902 123456 предъявлено при оформлении.", "expect_types": ["DRIVER_LICENSE"], "note": "grouped series and number"}
+{"id": "doc-x002", "text": "Удостоверения водителя 9902 123456 в деле нет.", "expect_types": ["DRIVER_LICENSE"], "note": "genitive noun form of the cue"}
+{"id": "doc-x003", "text": "Водительское удостоверение 77 АА 123456 старого образца.", "expect_types": ["DRIVER_LICENSE"], "note": "region code before the cyrillic series"}
+{"id": "doc-x004", "text": "Вод. удостоверение 77 АА 123456 сдано на замену.", "expect_types": ["DRIVER_LICENSE"], "note": "abbreviated cue"}
+{"id": "doc-x005", "text": "в/у 99 02 123456", "expect_types": ["DRIVER_LICENSE"], "note": "slash abbreviation and split series"}
+{"id": "doc-x006", "text": "Водительское удостоверение АБ 123456 выдано до 2011 года.", "expect_types": ["DRIVER_LICENSE"], "note": "cyrillic series of the old pattern"}
+{"id": "doc-x007", "text": "СНИЛС 112-233-445 95 подтверждён.", "expect_types": ["SNILS"], "note": "hyphens and a trailing space group"}
+{"id": "doc-x008", "text": "СНИЛС 112 233 445 95 принят.", "expect_types": ["SNILS"], "note": "spaces only"}
+{"id": "doc-x009", "text": "СНИЛС: 112-233-445-95", "expect_types": ["SNILS"], "note": "colon and full hyphenation"}
+{"id": "doc-x010", "text": "СНИЛС 11223344595 указан в анкете.", "expect_types": ["SNILS"], "note": "no separators at all"}
+{"id": "doc-x011", "text": "Пенсионное свидетельство 112-233-445 95 оформлено.", "expect_types": ["SNILS"], "note": "pension certificate wording"}
+{"id": "doc-x012", "text": "Загранпаспорт 751234567 действителен.", "expect_types": ["FOREIGN_PASSPORT"], "note": "nine solid digits of the new pattern"}
+{"id": "doc-x013", "text": "Загранпаспорт 75 1234567 продлён.", "expect_types": ["FOREIGN_PASSPORT"], "note": "series and number split"}
+{"id": "doc-x014", "text": "Загранпаспорт № 751234567 сдан на визу.", "expect_types": ["FOREIGN_PASSPORT"], "note": "numero sign between cue and digits"}
+{"id": "doc-x015", "text": "Полис ОМС 1234567890123456 активен.", "expect_types": ["OMS_POLICY"], "note": "sixteen digit policy"}
+{"id": "doc-x016", "text": "Полис ОМС АБ 1234567 старого образца.", "expect_types": ["OMS_POLICY"], "note": "cyrillic series of the old policy"}
+{"id": "doc-x017", "text": "Медицинский полис ВС 123456 заменён.", "expect_types": ["OMS_POLICY"], "note": "old policy with a six digit number"}
+{"id": "doc-x018", "text": "Полис обязательного медицинского страхования 1234 5678 9012 3456 оформлен.", "expect_types": ["OMS_POLICY"], "note": "cue spelled out in full"}
+{"id": "doc-x019", "text": "Военный билет АБ 1234567 предъявлен.", "expect_types": ["MILITARY_ID"], "note": "series and seven digits"}
+{"id": "doc-x020", "text": "Свидетельство о рождении II-МЮ 123456 приложено.", "expect_types": ["BIRTH_CERTIFICATE"], "note": "roman series and cyrillic sub-series"}
+{"id": "doc-x021", "text": "Вид на жительство 123456789 оформлен.", "expect_types": ["RESIDENCE_PERMIT"], "note": "residence permit number"}
+{"id": "doc-x022", "text": "РВП 1234567 продлено.", "expect_types": ["RESIDENCE_PERMIT"], "note": "temporary residence permit abbreviation"}
+{"id": "doc-x023", "text": "номер 123456 серия 4509", "expect_types": ["PASSPORT"], "note": "number printed before the series"}
+{"id": "doc-x024", "text": "серия 4509 N 123456", "expect_types": ["PASSPORT"], "note": "latin numero label"}
+{"id": "doc-x025", "text": "Серия: 4509  Номер: 123456", "expect_types": ["PASSPORT"], "note": "form layout with colons"}
+{"id": "doc-x026", "text": "паспорт 4509 12 34 56", "expect_types": ["PASSPORT"], "note": "number printed in pairs"}
+{"id": "doc-x027", "text": "паспорт 45 09 12 34 56", "expect_types": ["PASSPORT"], "note": "series and number both in pairs"}
+{"id": "doc-x028", "text": "паспортом 4509 123456 удостоверяется личность", "expect_types": ["PASSPORT"], "note": "anchor in the instrumental case"}
+{"id": "doc-x029", "text": "пасп. 4509 123456", "expect_types": ["PASSPORT"], "note": "abbreviated anchor"}
+{"id": "doc-x030", "text": "Паспорт выдан ОУФМС России по Тульской области.", "expect_types": ["PASSPORT_ISSUER"], "note": "migration office abbreviation"}
+{"id": "doc-x031", "text": "Паспорт выдан МП ОМВД России по Тульскому району.", "expect_types": ["PASSPORT_ISSUER"], "note": "migration point of a district office"}
+{"id": "doc-x032", "text": "код подразделения 770 001", "expect_types": ["SUBDIVISION_CODE"], "note": "code written with a space"}
+{"id": "doc-x033", "text": "код подр. 770001", "expect_types": ["SUBDIVISION_CODE"], "note": "abbreviated label and solid code"}
+{"id": "doc-x034", "text": "Место рождения: г. Тула Тульской области", "expect_types": ["BIRTH_PLACE"], "note": "city followed by its region"}
+{"id": "doc-x035", "text": "Место рождения: с. Ивановка, Тульская обл.", "expect_types": ["BIRTH_PLACE"], "note": "comma before the region"}
+{"id": "doc-x036", "text": "Российское гражданство подтверждено документами.", "expect_types": ["CITIZENSHIP"], "note": "country adjective before the label"}
+{"id": "doc-x037", "text": "Гражданин России обратился за кредитом.", "expect_types": ["CITIZENSHIP"], "note": "citizen of a named country"}
+{"id": "doc-x038", "text": "Инвентарный номер 123456 присвоен станку.", "expect_types": [], "note": "inventory number is not a passport number"}
+{"id": "doc-x039", "text": "Глава II описана в разделе III-IV подробно.", "expect_types": [], "note": "roman numerals in ordinary prose"}
+{"id": "doc-x040", "text": "Отделение банка обработало 9902 123456 обращений.", "expect_types": [], "note": "ten digits without a driver licence cue"}
+{"id": "doc-x041", "text": "Вуз принял 9902 123456 заявлений.", "expect_types": [], "note": "cue-like substring inside an unrelated word"}
+{"id": "doc-x042", "text": "Партия 77 АА 123456 принята складом.", "expect_types": [], "note": "region series without a driver licence cue"}
+{"id": "doc-x043", "text": "Отгружено ВС 123456 единиц продукции.", "expect_types": [], "note": "cyrillic pair and digits without an oms cue"}
+{"id": "doc-x044", "text": "Полис ОМС оформлен, оплачено 123456 рублей.", "expect_types": [], "note": "oms cue with an unrelated amount"}
+{"id": "doc-x045", "text": "Задача # 123456 закрыта исполнителем.", "expect_types": [], "note": "hash label without a passport series"}
+{"id": "doc-x046", "text": "Двойное гражданство не заявлено.", "expect_types": [], "note": "no country is named"}
+{"id": "doc-x047", "text": "Перечислено по 1234567 рублей поставщику.", "expect_types": [], "note": "preposition is not a document series"}
+{"id": "doc-x048", "text": "Загранпаспорт получен. Заказ 751234567 отгружен.", "expect_types": [], "note": "cue and digits in different sentences"}
+{"id": "doc-x049", "text": "Вид на жительство оформлен, оплачено 1500000 рублей.", "expect_types": [], "note": "amount after a residence permit mention"}
+{"id": "doc-x050", "text": "Паспорт проекта 4509 123456 утверждён комитетом.", "expect_types": [], "note": "figurative use of the word passport"}

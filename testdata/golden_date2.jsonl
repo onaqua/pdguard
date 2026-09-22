@@ -1,0 +1,25 @@
+{"id":"date2-001","text":"Дата рождения клиента: двенадцатое мая тысяча девятьсот девяностого года.","expect_types":["BIRTH_DATE"],"note":"fully spelled out date, year in words behind a birth anchor"}
+{"id":"date2-002","text":"Дата рождения: двадцать первое мая две тысячи первого года","expect_types":["BIRTH_DATE"],"note":"compound spelled day with a dve tysyachi year"}
+{"id":"date2-003","text":"Дата рождения: первое января двухтысячного года","expect_types":["BIRTH_DATE"],"note":"dvuhtysyachnogo carries its own thousand"}
+{"id":"date2-004","text":"Клиент родился двенадцатого мая тысяча девятьсот восемьдесят восьмого года","expect_types":["BIRTH_DATE"],"note":"four component year, participle anchor"}
+{"id":"date2-005","text":"Дата выдачи паспорта: двадцатое июня две тысячи пятнадцатого года","expect_types":["PASSPORT_ISSUE_DATE"],"note":"spelled out issue date"}
+{"id":"date2-006","text":"Дата рождения: тридцать первое декабря тысяча девятьсот девяносто девятого года","expect_types":["BIRTH_DATE"],"note":"compound day and compound year in one span"}
+{"id":"date2-007","text":"Дата рождения: 12 мая тысяча девятьсот девяностого года","expect_types":["BIRTH_DATE"],"note":"numeric day, month word, year in words"}
+{"id":"date2-008","text":"Дата рождения: 15  /  07  /  1988 года.","expect_types":["BIRTH_DATE"],"note":"padded slashes, the reported spacing gap"}
+{"id":"date2-009","text":"Дата рождения 12 . 05 . 1990","expect_types":["BIRTH_DATE"],"note":"padded dots"}
+{"id":"date2-010","text":"Паспорт выдан 20 - 06 - 2015 отделением по району.","expect_types":["PASSPORT_ISSUE_DATE"],"note":"padded dashes behind an issue anchor"}
+{"id":"date2-011","text":"Анкета: 15  /  07  /  1988 г.р.","expect_types":["BIRTH_DATE"],"note":"padded separators typed by the right hand anchor"}
+{"id":"date2-012","text":"Анкета: род. 07.11.1975","expect_types":["BIRTH_DATE"],"note":"abbreviated rod. anchor"}
+{"id":"date2-013","text":"Клиент 1975 г.р. обратился повторно.","expect_types":["BIRTH_DATE"],"note":"bare year with a g.r. suffix"}
+{"id":"date2-014","text":"Дата рождения 1975-11-20","expect_types":["BIRTH_DATE"],"note":"ISO 8601 birth date"}
+{"id":"date2-015","text":"Дата рождения в диапазоне с 03.04.1981 по 09.08.1981","expect_types":["BIRTH_DATE"],"note":"both ends of a range behind one anchor"}
+{"id":"date2-016","text":"Двенадцатое мая тысяча девятьсот девяностого года стало важной датой в истории банка.","expect_types":[],"note":"spelled out date with no anchor: prose, not personal data"}
+{"id":"date2-017","text":"В тысяча девятьсот сорок первом началась война.","expect_types":[],"note":"spelled year in ordinary prose"}
+{"id":"date2-018","text":"Компания основана двенадцатого мая тысяча девятьсот девяностого года.","expect_types":[],"note":"spelled out founding date is not a birth date"}
+{"id":"date2-019","text":"Сумма 15 07 1988 рублей перечислена на счёт.","expect_types":[],"note":"three numbers in a row are not a date"}
+{"id":"date2-020","text":"Колонки отчёта:\n15  07  1988\n16  08  1989","expect_types":[],"note":"table columns: no explicit separator, padding alone must not join them"}
+{"id":"date2-021","text":"Счёт 15  /  07  /  1988 закрыт бухгалтерией.","expect_types":[],"note":"padded separators do not override a negative anchor"}
+{"id":"date2-022","text":"Версия 1 . 2 . 3 выпущена в продакшн.","expect_types":[],"note":"padded version string is not a date"}
+{"id":"date2-023","text":"Прошивка 2.10.5 установлена на узле 10.0.0.15.","expect_types":[],"note":"version and IP address"}
+{"id":"date2-024","text":"Отчёт сформирован 05 . 03 . 2026 автоматически.","expect_types":[],"note":"a recent unanchored business date stays verbatim even when padded"}
+{"id":"date2-025","text":"В тысяча девятьсот девяносто первом году распался Советский Союз.","expect_types":[],"note":"historical year in words"}

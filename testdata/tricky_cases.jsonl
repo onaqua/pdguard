@@ -1,0 +1,52 @@
+{"id":"neg-pushkin-01","text":"В школьную программу входит стихотворение Александра Пушкина.","expect_types":[],"note":"famous poet genitive"}
+{"id":"neg-pushkin-02","text":"Памятник Пушкину А.С. установлен на площади в 1880 году.","expect_types":[],"note":"famous poet dative with initials"}
+{"id":"neg-pushkin-03","text":"Встретимся на станции метро Пушкинская завтра в полдень.","expect_types":[],"note":"toponym derived from poet"}
+{"id":"neg-pushkin-04","text":"Библиотека имени А. С. Пушкина открыта для читателей ежедневно.","expect_types":[],"note":"institution named after poet"}
+{"id":"neg-tolstoy-01","text":"Роман Льва Николаевича Толстого Война и мир известен во всем мире.","expect_types":[],"note":"famous writer"}
+{"id":"neg-gagarin-01","text":"Юрий Алексеевич Гагарин совершил первый в истории полет в космос в 1961 году.","expect_types":[],"note":"first cosmonaut"}
+{"id":"neg-street-01","text":"Офис расположен на улице Александра Пушкина, дом 10.","expect_types":[],"note":"street named after famous person"}
+{"id":"neg-street-02","text":"Курьер доставил заказ на проспект Юрия Гагарина, дом 25.","expect_types":[],"note":"avenue named after famous person"}
+{"id":"neg-street-03","text":"Маршрут проходит через бульвар Дмитрия Донского.","expect_types":[],"note":"boulevard named after historical figure"}
+{"id":"neg-bank-01","text":"Отделение Альфа-Банка: г. Москва, ул. Арбат, д. 4, часы работы с 9 до 20.","expect_types":[],"note":"bank branch address"}
+{"id":"neg-bank-02","text":"Банкомат Альфа-Банка установлен по адресу: г. Москва, пр-т Мира, д. 40.","expect_types":[],"note":"bank ATM address"}
+{"id":"neg-bank-03","text":"Центральный офис банка находится по адресу: г. Москва, ул. Маши Порываевой, 9.","expect_types":[],"note":"bank head office"}
+{"id":"neg-bank-04","text":"Обратитесь в ДО Тверской ПАО Сбербанк для перевыпуска карты.","expect_types":[],"note":"bank branch code and name"}
+{"id":"neg-words-01","text":"Специальное предложение действует для постоянных клиентов компании.","expect_types":[],"note":"genitive plural клиентов looks like surname suffix"}
+{"id":"neg-words-02","text":"Отчет составлен группой независимых аудиторов в полном объеме.","expect_types":[],"note":"аудиторов looks like surname ending in ов"}
+{"id":"neg-words-03","text":"Ожидается доклад от ведущих экспертов отрасли.","expect_types":[],"note":"экспертов after preposition от looks like surname"}
+{"id":"neg-words-04","text":"Пекарня принимает заказы на изготовление пирогов и тортов.","expect_types":[],"note":"пирогов looks like surname"}
+{"id":"neg-words-05","text":"В городском парке высадили аллею из молодых кленов и дубов.","expect_types":[],"note":"кленов дубов look like surnames"}
+{"id":"neg-pin-01","text":"Для входа в личный кабинет введите пин-код 1234 на экране терминала.","expect_types":[],"note":"PIN code alone without card number must not be masked"}
+{"id":"neg-pin-02","text":"По умолчанию ПИН-код на сим-карте установлен 0000.","expect_types":[],"note":"SIM pin code alone without card number"}
+{"id":"neg-contract-01","text":"Оплата по договору № 4509 123456 от 15.01.2024 на сумму 50000 руб.","expect_types":[],"note":"contract number with passport series/number format"}
+{"id":"neg-contract-02","text":"Счет-фактура 12/05/1990 была аннулирована бухгалтерией.","expect_types":[],"note":"invoice id looking like date"}
+{"id":"neg-contract-03","text":"Заказ 770-001 готов к выдаче на складе.","expect_types":[],"note":"order number looking like subdivision code"}
+{"id":"neg-tech-01","text":"Обновите пакет nginx до версии 1.24.0 на сервере 192.168.1.1.","expect_types":[],"note":"software version and IP address looking like dates"}
+{"id":"neg-tech-02","text":"Коммит 8a77d363c7c044b49b41d7b8a448243a успешно объединен в ветку main.","expect_types":[],"note":"git SHA-1 / hex hash"}
+{"id":"neg-tech-03","text":"Идентификатор транзакции: 123e4567-e89b-12d3-a456-426614174000 в системе.","expect_types":[],"note":"UUID looking like tokens/numbers"}
+{"id":"neg-amount-01","text":"Баланс счета составляет 4276.16 рублей по состоянию на утро.","expect_types":[],"note":"currency amount with dot looking like card prefix"}
+{"id":"neg-amount-02","text":"Комиссия банка составила 4509 руб. 12 коп. за операцию.","expect_types":[],"note":"currency amount looking like passport series"}
+{"id":"neg-amount-03","text":"Скидка 15% предоставляется всем пенсионерам при предъявлении купона.","expect_types":[],"note":"percentage looking like day"}
+{"id":"neg-org-01","text":"ООО Иванов и партнеры заключило соглашение о поставке оборудования.","expect_types":[],"note":"legal entity with surname"}
+{"id":"neg-org-02","text":"ИП Сидоров А.В. выполнил электромонтажные работы в полном объеме.","expect_types":[],"note":"individual entrepreneur context"}
+{"id":"neg-adv-stars","text":"Внимание: пароль пользователя содержит символы ** и *** в середине.","expect_types":[],"note":"pre-existing asterisks must not be broken or misidentified"}
+{"id":"neg-adv-label","text":"Шаблон сообщения: Уважаемый [ФИО], ваш [PASSPORT] готов к выдаче.","expect_types":[],"note":"pre-existing bracketed labels"}
+{"id":"neg-adv-pseudonym","text":"Идентификатор устройства в базе: PD_A1B2C3D4_DEV.","expect_types":[],"note":"pre-existing PD_ pseudonym string"}
+{"id":"pos-lower-fio","text":"Клиент иванов иван иванович обратился за выпиской по счету.","expect_types":["FIO"],"note":"lowercase FIO in mixed text"}
+{"id":"pos-reversed-fio","text":"Иван Иванович Иванов оформил заявку на потребительский кредит.","expect_types":["FIO"],"note":"name patronymic surname order"}
+{"id":"pos-hyphen-surname","text":"Заемщик Салтыков-Щедрин Михаил Евграфович подтвердил свои данные.","expect_types":["FIO"],"note":"hyphenated double surname"}
+{"id":"pos-female-hyphen","text":"Клиентка Иванова-Петрова Анна Сергеевна открыла вклад.","expect_types":["FIO"],"note":"female double surname"}
+{"id":"pos-date-words-year","text":"Дата рождения клиента: двенадцатое мая тысяча девятьсот девяностого года.","expect_types":["BIRTH_DATE"],"note":"fully spelled out date with word year"}
+{"id":"pos-date-spaces","text":"Дата рождения: 15  /  07  /  1988 года.","expect_types":["BIRTH_DATE"],"note":"date with irregular spaces around slashes"}
+{"id":"pos-date-yyyymmdd","text":"Дата рождения: 1985-11-20, место рождения г. Самара.","expect_types":["BIRTH_DATE","BIRTH_PLACE"],"note":"ISO format date"}
+{"id":"pos-pass-words","text":"Паспорт серия 45 09 номер 123456, выдан ОВД Арбат.","expect_types":["PASSPORT","PASSPORT_ISSUER"],"note":"passport with words серия номер and spaced series"}
+{"id":"pos-pass-numero","text":"Паспортные данные: № 4509-123456 выдан 12.05.2015.","expect_types":["PASSPORT","PASSPORT_ISSUE_DATE"],"note":"passport with numero sign and dash"}
+{"id":"pos-card-hyphen","text":"Оплата картой 4276-1600-1234-5678 в интернет-магазине.","expect_types":["CARD_NUMBER"],"note":"card number with hyphens"}
+{"id":"pos-card-continuous","text":"Номер карты 4276160012345678, срок 12/28.","expect_types":["CARD_NUMBER"],"note":"continuous 16 digits without spaces"}
+{"id":"pos-card-pin","text":"Карта 4276 1600 1234 5678, пин-код 1234.","expect_types":["CARD_NUMBER","PIN"],"note":"PIN companion rule: both card and PIN must be masked"}
+{"id":"pos-holder-latin","text":"CARD NUMBER 4276 1600 1234 5678 CARDHOLDER IVAN IVANOV EXP 12/26","expect_types":["CARD_NUMBER","CARD_HOLDER"],"note":"latin cardholder on credit card"}
+{"id":"pos-phone-bracketless","text":"Телефон для связи: 89161234567, доступен в рабочие часы.","expect_types":["PHONE"],"note":"phone without brackets or spaces"}
+{"id":"pos-phone-dots","text":"Контактный телефон: +7.916.123.45.67 доб. нет.","expect_types":["PHONE"],"note":"phone with dot separators"}
+{"id":"pos-addr-complex","text":"Зарегистрирован: 190000, г. Санкт-Петербург, наб. реки Мойки, д. 12, лит. А, кв. 34.","expect_types":["POSTAL_CODE","CITY","STREET","HOUSE","APARTMENT"],"note":"complex address with letter in house number"}
+{"id":"pos-snils-custom","text":"Предоставил СНИЛС 123-456-789 01 и полис ОМС 1234567890123456.","expect_types":["SNILS","OMS_POLICY"],"note":"bonus documents: SNILS and OMS policy"}
+{"id":"pos-driver-license","text":"Водительское удостоверение серия 77 12 № 345678 категории B.","expect_types":["DRIVER_LICENSE"],"note":"driver license with серия and №"}
