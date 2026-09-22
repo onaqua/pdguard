@@ -1,0 +1,136 @@
+{
+  "uid": "pdguard-main",
+  "title": "pdguard — модуль безопасности ПД",
+  "description": "Latency, RPS и TPS — три показателя, которых требует раздел 4.4 ТЗ, плюс то, что показывает, honest ли эти три: доля 429, вытеснение из хранилища и откаты демаскирования.",
+  "tags": ["pdguard"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Latency по операциям (SLA ТЗ — 1 с)",
+      "description": "Квантили считаются из гистограммы pdguard_request_duration_seconds. Красная линия — предел ТЗ в 1 секунду; оранжевая — 100 мс, отметка, ниже которой запас ещё трёхзначный.",
+      "id": 1,
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.1 },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le, op) (rate(pdguard_request_duration_seconds_bucket[1m])))", "legendFormat": "p50 {{op}}" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le, op) (rate(pdguard_request_duration_seconds_bucket[1m])))", "legendFormat": "p95 {{op}}" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le, op) (rate(pdguard_request_duration_seconds_bucket[1m])))", "legendFormat": "p99 {{op}}" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Сейчас",
+      "description": "RPS и TPS — прямые требования ТЗ 4.4. In-flight показывает, сколько запросов обрабатывается одновременно: упёрлось в server.max_concurrent — начнутся 429.",
+      "id": 2,
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "RPS" }, "properties": [{ "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "text", "value": null }, { "color": "green", "value": 1000 }] } }] }
+        ]
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        { "refId": "A", "expr": "pdguard_rps", "legendFormat": "RPS" },
+        { "refId": "B", "expr": "pdguard_tps", "legendFormat": "TPS (токенов/с)" },
+        { "refId": "C", "expr": "pdguard_inflight", "legendFormat": "in-flight" },
+        { "refId": "D", "expr": "pdguard_store_entries", "legendFormat": "соответствий в хранилище" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Запросы по статусам",
+      "description": "429 допустим под нагрузкой, но устойчивый ненулевой ряд означает, что решение не держит нагрузку — и это попадёт в метрики проверки.",
+      "id": 3,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 15, "stacking": { "mode": "normal" }, "showPoints": "never" } },
+        "overrides": [
+          { "matcher": { "id": "byRegexp", "options": ".*200.*" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*429.*" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*5[0-9][0-9].*" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "refId": "A", "expr": "sum by (status) (rate(pdguard_requests_total[1m])) > 0", "legendFormat": "{{status}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Пропускная способность: маскирование и демаскирование",
+      "description": "Прямой и обратный шаг должны идти парами — расхождение рядов означает, что часть элементов не дошла до обратной проверки.",
+      "id": 4,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "reqps", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "refId": "A", "expr": "sum by (op) (rate(pdguard_requests_total[1m]))", "legendFormat": "{{op}}" }
+      ]
+    },
+    {
+      "type": "bargauge",
+      "title": "Найдено ПД по типам (всего)",
+      "description": "Требование ТЗ 4.1 — учитывать выявленные типы ПД по каждому запросу. Значения самих данных сюда не попадают: только имя категории и счётчик.",
+      "id": 5,
+      "gridPos": { "h": 11, "w": 12, "x": 0, "y": 17 },
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "min": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] } }, "overrides": [] },
+      "options": { "displayMode": "gradient", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true, "minVizWidth": 8, "minVizHeight": 10 },
+      "targets": [
+        { "refId": "A", "expr": "sort_desc(sum by (type) (pdguard_pd_detected_total) > 0)", "legendFormat": "{{type}}", "instant": true }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Хранилище соответствий payload_id",
+      "description": "Три ряда, за которыми стоит следить на прогоне. Вытеснение или истечение до того, как пришёл обратный шаг, означает провал демаскирования — а fallback показывает, сколько раз это уже случилось.",
+      "id": 6,
+      "gridPos": { "h": 11, "w": 12, "x": 12, "y": 17 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "вытеснено/с" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
+          { "matcher": { "id": "byName", "options": "откатов демаскирования/с" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "refId": "A", "expr": "pdguard_store_entries", "legendFormat": "соответствий сейчас" },
+        { "refId": "B", "expr": "rate(pdguard_store_evicted_total[1m])", "legendFormat": "вытеснено/с" },
+        { "refId": "C", "expr": "rate(pdguard_store_expired_total[1m])", "legendFormat": "истекло по TTL/с" },
+        { "refId": "D", "expr": "rate(pdguard_demask_fallback_total[1m])", "legendFormat": "откатов демаскирования/с" }
+      ]
+    }
+  ]
+}
