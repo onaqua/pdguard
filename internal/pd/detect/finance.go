@@ -23,6 +23,7 @@ func (financeDetector) Types() []pd.Type { return financeTypes }
 // the same byte length as ctx.Text, so no remapping is needed.
 func (financeDetector) Detect(ctx *Context) []pd.Span {
 	s := finScan{lower: ctx.Lower}
+	s.bare = finBarePayload(ctx.Lower)
 	s.card = ctx.Enabled(pd.TypeCardNumber)
 	s.inn = ctx.Enabled(pd.TypeINN)
 	s.account = ctx.Enabled(pd.TypeBankAccount)
@@ -78,6 +79,9 @@ type finCue struct{ known, has bool }
 type finScan struct {
 	lower string
 
+	// bare is true when the whole payload is a single bare value.
+	bare bool
+
 	// Per-type switches from ctx.Enabled.
 	card, inn, account, cvv, pin bool
 	// Whether the payload contains any cue word for the type at all, resolved
@@ -110,6 +114,16 @@ const (
 	finConfINN12      = 0.90 // control digits verify, 12 digits, no cue word
 	finConfINNAnchor  = 0.85 // cue word present, control digits do not verify
 
+	// finConfINNBare covers a payload that is nothing but the number itself.
+	// A ten-digit INN carries a single control digit, so a random number passes
+	// it one time in eleven; that evidence alone cannot compete with detectors
+	// that have context, hence the modest score.
+	finConfINNBare = 0.80
+	// finConfINNBareGrouped covers a bare payload whose twelve digits are split
+	// across groups and whose two control digits verify. Two control digits are
+	// one chance in 121, so the arithmetic is strong enough to stand alone.
+	finConfINNBareGrouped = 0.90
+
 	finConfIBAN    = 0.97 // mod-97 checksum verifies
 	finConfAccount = 0.95 // 20 digits (or an IBAN shape) next to a cue word
 
@@ -136,6 +150,12 @@ const (
 	finCardMinDigits = 13
 	finCardMaxDigits = 19
 )
+
+// finCardBareDigits is the only length at which a bare digit run is more often
+// a card than something else: 13 is EAN-13, 14 is a timestamp, 15 is an OGRNIP,
+// 17-19 are warehouse and transport identifiers. Only a bare 16-digit window
+// earns the card shape without a cue word.
+const finCardBareDigits = 16
 
 // finAccountDigits is the length of a Russian bank account number. It is fixed
 // by the Bank of Russia chart of accounts, so there is no range to allow for.
@@ -276,6 +296,9 @@ func (s *finScan) chain(cs, ce int) {
 		}
 	}
 	s.groups = append(s.groups, finGroup{g, ce})
+	if s.bare {
+		s.dropExportSuffix()
+	}
 	s.used = s.used[:0]
 	if s.card {
 		s.scanCard()
@@ -289,6 +312,48 @@ func (s *finScan) chain(cs, ce int) {
 	if s.cvv || s.pin {
 		s.scanSecrets()
 	}
+}
+
+// finBarePayload reports whether the whole payload is one bare value.
+func finBarePayload(lower string) bool {
+	i, j := 0, len(lower)
+	for i < j && (lower[i] == ' ' || lower[i] == '\t' || lower[i] == '\n' || lower[i] == '\r') {
+		i++
+	}
+	for j > i && (lower[j-1] == ' ' || lower[j-1] == '\t' || lower[j-1] == '\n' || lower[j-1] == '\r') {
+		j--
+	}
+	if i >= j {
+		return false
+	}
+	digits := false
+	for k := i; k < j; k++ {
+		c := lower[k]
+		switch {
+		case finIsDigit(c):
+			digits = true
+		case finIsChainSep(c):
+		default:
+			return false
+		}
+	}
+	return digits
+}
+
+// dropExportSuffix removes a trailing ".0" group.
+func (s *finScan) dropExportSuffix() {
+	n := len(s.groups)
+	if n < 2 {
+		return
+	}
+	last := s.groups[n-1]
+	if last.end-last.start != 1 || s.lower[last.start] != '0' {
+		return
+	}
+	if last.start == 0 || s.lower[last.start-1] != '.' {
+		return
+	}
+	s.groups = s.groups[:n-1]
 }
 
 // cue lazily resolves the whole-payload pre-filter.
@@ -328,19 +393,25 @@ func (s *finScan) cardWindow(i int) (int, float64, bool) {
 			return j, finConfLuhn, true
 		}
 	}
-	// Gates for passes 2 and 3: everything below needs a cue word.
-	if !finIssuerDigit(s.lower[s.groups[i].start]) ||
-		!s.cue(&s.cardCue, finCardProbes) ||
-		!finCueLeft(s.lower, s.groups[i].start, finCardAnchors, finAnchorWindow) {
+	// Gates for passes 2 and 3: everything below needs a cue word, except a
+	// bare payload, which may only use the card shape of pass 3.
+	if !finIssuerDigit(s.lower[s.groups[i].start]) {
+		return 0, 0, false
+	}
+	cued := s.cue(&s.cardCue, finCardProbes) &&
+		finCueLeft(s.lower, s.groups[i].start, finCardAnchors, finAnchorWindow)
+	if !cued && !s.bare {
 		return 0, 0, false
 	}
 	// Pass 2: Luhn at any grouping (cue already present).
-	for j := hi; j >= lo; j-- {
-		if s.allSame(i, j) || s.usedOverlap(s.groups[i].start, s.groups[j].end) {
-			continue
-		}
-		if s.luhn(i, j) {
-			return j, finConfLuhn, true
+	if cued {
+		for j := hi; j >= lo; j-- {
+			if s.allSame(i, j) || s.usedOverlap(s.groups[i].start, s.groups[j].end) {
+				continue
+			}
+			if s.luhn(i, j) {
+				return j, finConfLuhn, true
+			}
 		}
 	}
 	// Pass 3: card grouping without Luhn.
@@ -349,10 +420,41 @@ func (s *finScan) cardWindow(i int) (int, float64, bool) {
 			continue
 		}
 		if s.grouped(i, j) {
+			if !cued && !finCardBareShape(s, i, j) {
+				continue
+			}
 			return j, finConfCardAnchor, true
 		}
 	}
 	return 0, 0, false
+}
+
+// finCardBareShape reports whether a bare window has a real card shape.
+func finCardBareShape(s *finScan, i, j int) bool {
+	n := 0
+	for k := i; k <= j; k++ {
+		n += s.groups[k].end - s.groups[k].start
+	}
+	if n != finCardBareDigits {
+		return false
+	}
+	// Reject a run of three or more four-digit groups that all read as years
+	// in 1900..2099, which is an export cell of several years, not a card.
+	years := 0
+	for k := i; k <= j; k++ {
+		g := s.groups[k]
+		if g.end-g.start != 4 {
+			continue
+		}
+		y := 0
+		for p := g.start; p < g.end; p++ {
+			y = y*10 + int(s.lower[p]-'0')
+		}
+		if y >= 1900 && y <= 2099 {
+			years++
+		}
+	}
+	return years < 3
 }
 
 // cardBounds finds the contiguous range of valid card windows from group i.
@@ -451,6 +553,8 @@ func (s *finScan) scanINN() {
 			conf = finConfINN12
 		case cued:
 			conf = finConfINNAnchor
+		case s.bare && valid && finINNRegion(d):
+			conf = finConfINNBare
 		default:
 			continue
 		}
@@ -465,7 +569,10 @@ func (s *finScan) scanINN() {
 
 // scanINNGrouped finds INNs split across groups, next to a cue word.
 func (s *finScan) scanINNGrouped() {
-	if len(s.groups) < 2 || !s.cue(&s.innCue, finINNProbes) {
+	if len(s.groups) < 2 {
+		return
+	}
+	if !s.bare && !s.cue(&s.innCue, finINNProbes) {
 		return
 	}
 	for i := 0; i < len(s.groups); {
@@ -481,13 +588,21 @@ func (s *finScan) scanINNGrouped() {
 			if s.allSame(i, j) || s.usedOverlap(s.groups[i].start, s.groups[j].end) {
 				continue
 			}
-			if !finCueLeft(s.lower, s.groups[i].start, finINNAnchors, finAnchorWindow) {
+			cued := s.cue(&s.innCue, finINNProbes) &&
+				finCueLeft(s.lower, s.groups[i].start, finINNAnchors, finAnchorWindow)
+			ok := s.innChecksum(i, j)
+			switch {
+			case cued && ok:
+				conf = finConfINNChecked
+			case cued:
+				conf = finConfINNAnchor
+			case s.bare && ok && n == finINNMaxDigits &&
+				i == 0 && j == len(s.groups)-1:
+				conf = finConfINNBareGrouped
+			default:
 				continue
 			}
-			hit, conf = j, finConfINNAnchor
-			if s.innChecksum(i, j) {
-				conf = finConfINNChecked
-			}
+			hit = j
 			break
 		}
 		if hit < 0 {
@@ -724,6 +839,15 @@ func finLuhn(d string) bool {
 	}
 	sum, _ := finLuhnFold(d, 0, false)
 	return sum%10 == 0
+}
+
+// finINNRegion reports whether the leading pair is a real tax-region code.
+func finINNRegion(d string) bool {
+	if len(d) < 2 {
+		return false
+	}
+	v := int(d[0]-'0')*10 + int(d[1]-'0')
+	return (v >= 1 && v <= 92) || v == 99
 }
 
 // finINNChecksum reports whether d has valid INN control digits.

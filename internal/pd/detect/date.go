@@ -137,6 +137,18 @@ const (
 	// dateConfEps absorbs binary floating point error when a confidence is
 	// compared against a band: 0.95-0.05 is not exactly 0.90.
 	dateConfEps = 1e-9
+	// dateLabelWindow — дальнобойность ЯВНОЙ МЕТКИ ПОЛЯ ("дата рождения",
+	// "дата выдачи"). Шире dateAnchorWindow, потому что бланк печатает между
+	// меткой и значением целое родительное словосочетание: "Дата выдачи паспорта
+	// представителя клиента: 10.03.15" — 61 байт уточнений. Дальнобойность
+	// покупается не шириной, а чистотой промежутка: см. dateCleanRun.
+	dateLabelWindow = 96
+	// dateConfNoYear — дата, у которой года нет вовсе ("15 января", "15 03").
+	// Явный якорь для неё обязателен, поэтому она уверенно выше порога 0.7; но
+	// она ниже dateConfAnchored, чтобы полная дата всегда выигрывала у частичной
+	// внутри Resolve, и ровно на уровне dateConfRightAnchored, чтобы не заводить
+	// новую полосу уверенности и не ломать TestDateConfidenceBandsAreDisjoint.
+	dateConfNoYear = 0.90
 )
 
 // dateWordYearMarker is the cheap prefilter that keeps the spelled-out year
@@ -217,6 +229,42 @@ var (
 	// dateRightNegatives fire when the "date" is immediately followed by a
 	// unit, which means it was a number all along.
 	dateRightNegatives = []string{"%", "руб", "₽", "$", "коп", "usd", "eur"}
+	// dateBirthLabels / dateIssueLabels — ЗАМКНУТЫЙ список явных меток поля.
+	// Сюда не попадают короткие и многозначные якоря ("др", "гр", "выдачи",
+	// "рождения"): их дальнобойность стоила бы ровно той точности, ради которой
+	// dateAnchorWindow держали узким. "выдачи" отдельно исключено из-за
+	// addr2-008 "Пункт выдачи находится на улице Гагарина, дом 4."
+	//
+	// ГОЛЫЕ ГЛАГОЛЫ "выдан"/"выдана"/"выдано" в дальнобойный список ТОЖЕ НЕ
+	// ВХОДЯТ (см. риск R-2). Они остаются в dateIssueAnchors и сохраняют свои
+	// 60 байт, потому что в реальном тексте они относятся не к дате, а к
+	// предмету ("Справка выдана для предъявления по месту требования от
+	// 01.09.2024", "Доверенность выдана Ивановым Иваном Ивановичем, паспорт
+	// серия 12 05 номер 123456"). Ни один заявленный позитив из раздела 4 от
+	// их дальнобойности не зависит: единственный кейс с "выдан"
+	// ("Паспорт выдан 15 03, …") имеет метку в 1 байте от значения и
+	// закрывается обычным leftAnchor.
+	//
+	// Инвариант списка: каждая метка — ДВУСЛОВНОЕ сочетание "дата/дату/даты/
+	// дате/год/года" + "рождения/выдачи". ОДНОСЛОВНЫХ элементов тут быть не
+	// должно; добавление любого — отдельное решение с разбором негативов.
+	dateBirthLabels = []string{
+		"дата рождения", "дату рождения", "даты рождения", "дате рождения",
+		"дата рожд", "год рождения", "года рождения",
+	}
+	dateIssueLabels = []string{
+		"дата выдачи", "дату выдачи", "даты выдачи", "дате выдачи",
+	}
+	// dateIdentifierLeft / dateIdentifierRight — слова, которые превращают
+	// пару из двух чисел <= 12 в половину чужого идентификатора: серию
+	// документа или номер дома с дробью (риски R-3 и R-4). См.
+	// dateDayMonthInIdentifier.
+	dateIdentifierLeft = []string{
+		"серия", "серии", "сер",
+		"дом", "д", "корпус", "корп", "стр", "строение",
+		"кв", "квартира", "офис", "оф", "владение", "влд", "лит", "литера",
+	}
+	dateIdentifierRight = []string{"№", "номер", "no"}
 )
 
 // dateDetector finds birth dates and passport issue dates.
@@ -250,6 +298,7 @@ func (d dateDetector) Detect(ctx *Context) []pd.Span {
 	var out []pd.Span
 	out = d.numeric(ctx, out, now)
 	out = d.textual(ctx, out, now, &gate)
+	out = d.numDayMonth(ctx, out)
 	out = d.tokenScan(ctx, out, now, &gate)
 	out = d.birthYear(ctx, out, now)
 	if len(out) == 0 {
@@ -321,6 +370,190 @@ func (d dateDetector) numeric(ctx *Context, out []pd.Span, now int) []pd.Span {
 	return out
 }
 
+// numDayMonth находит "15 03" и "15/03" — день и месяц, у которых года нет.
+// Форма сама по себе не несёт никаких признаков даты (это два числа), поэтому
+// ЯВНЫЙ якорь обязателен и проверяется ПЕРВЫМ, как в compact.
+func (d dateDetector) numDayMonth(ctx *Context, out []pd.Span) []pd.Span {
+	s := ctx.Lower
+	toks := ctx.Tokens
+	for i := 0; i+2 < len(toks); i++ {
+		g1 := toks[i]
+		if g1.Kind != text.KindNumber || g1.Len() > 2 {
+			continue
+		}
+		sep, j, ok := dateSepAt(s, toks, i+1)
+		if !ok {
+			continue
+		}
+		g2 := toks[j]
+		if g2.Kind != text.KindNumber || g2.Len() > 2 {
+			continue
+		}
+		if !dateDayMonthIsolated(s, toks, i, j, sep) {
+			continue
+		}
+		n1, e1 := strconv.Atoi(s[g1.Start:g1.End])
+		n2, e2 := strconv.Atoi(s[g2.Start:g2.End])
+		if e1 != nil || e2 != nil {
+			continue
+		}
+		var day, mon int
+		switch {
+		case n1 > 12 && n2 <= 12:
+			day, mon = n1, n2
+		case n2 > 12 && n1 <= 12:
+			day, mon = n2, n1
+		case n1 <= 12 && n2 <= 12:
+			day, mon = n1, n2
+		default:
+			continue
+		}
+		if day < 1 || day > maxDaysInMonth(mon) {
+			continue
+		}
+		if dateDayMonthInIdentifier(ctx, g1.Start, g2.End) {
+			continue
+		}
+		sp, ok := d.classifyNoYear(ctx, g1.Start, g2.End, "dm")
+		if !ok {
+			continue
+		}
+		out = dateAppend(out, sp)
+		i = j
+	}
+	return out
+}
+
+// dateDayMonthIsolated — несущая проверка правила numDayMonth. Без неё
+// "Дата рождения 29.02.1990" (негатив date-ext-035: 1990 не високосный)
+// вернулся бы как совершенно валидная пара "29.02", а золотой позитив
+// "дата рождения 1990-05-12" предложил бы вторую дату "05-12".
+//
+// ТРИ УТОЧНЕНИЯ, без которых проверка дырявая (риск R-5):
+//
+//  1. Соседняя группа — это не только text.KindNumber. Токенизатор склеивает
+//     год с приклеенной "г" в ОДИН токен text.KindAlnum ("1990г" в
+//     "12.05.1990г.р."), и ровно ради этого написан dateYearEnd. Проверка на
+//     Kind == KindNumber такую группу не видит. Блокирующей считается любая
+//     соседняя группа, у которой dateDigitPrefix(s, t) > 0.
+//  2. Просмотр через паддинг обязателен С ОБЕИХ сторон и для ЛЮБОГО sep,
+//     включая ' '. Иначе "Дата рождения 15 07  1988" (пара через один
+//     пробел, год через два) даст span "15 07" и оставит "1988" снаружи.
+//  3. Для sep == ' ' блокирующей считается соседняя числовая группа через
+//     ЛЮБОЙ из четырёх разделителей, а не только через пробел: "15 07.1988"
+//     — это одна запись, а не пара плюс год.
+func dateDayMonthIsolated(s string, toks []text.Token, first, last int, sep byte) bool {
+	if p := datePadBack(s, toks, first-1); p >= 0 {
+		if dateDigitPrefix(s, toks[p]) > 0 {
+			return false
+		}
+		if dateSepBlocks(s, toks, p, sep) {
+			if q := datePadBack(s, toks, p-1); q >= 0 && dateDigitPrefix(s, toks[q]) > 0 {
+				return false
+			}
+		}
+	}
+	if n := datePadFwd(s, toks, last+1); n >= 0 {
+		if dateDigitPrefix(s, toks[n]) > 0 {
+			return false
+		}
+		if dateSepBlocks(s, toks, n, sep) {
+			if m := datePadFwd(s, toks, n+1); m >= 0 && dateDigitPrefix(s, toks[m]) > 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// dateSepBlocks reports whether the token at index i is a separator that
+// continues the numeric record: the same separator as sep, or any of the four
+// separators when sep is a space.
+func dateSepBlocks(s string, toks []text.Token, i int, sep byte) bool {
+	if !datePunctSep(s, toks[i]) {
+		return false
+	}
+	if sep == ' ' {
+		return true
+	}
+	return s[toks[i].Start] == sep
+}
+
+// dateDayMonthInIdentifier отсекает два класса, в которых пара из двух
+// чисел <= 12 — не дата, а половина чужого идентификатора. Проверяется
+// узким окном (16 байт влево, 12 байт вправо), по границам слова.
+//
+// СЕРИЯ ДОКУМЕНТА (риск R-3). Серия российского паспорта печатается ровно
+// как пара двузначных групп: "45 09", "77 12", "12 05". Блокирует: слово
+// "серия"/"серии"/"сер" слева; "№", "номер", "no" справа; числовая группа
+// из 6 цифр справа через любой разделитель или пробел.
+//
+// АДРЕС (риск R-4). "дом 4/2", "д. 12/1", "корпус 1/2", "кв. 5/2" — это
+// штатная русская запись дома с дробью. Блокирует слева: "дом", "д",
+// "корпус", "корп", "стр", "строение", "кв", "квартира", "офис", "оф",
+// "владение", "влд", "лит", "литера".
+func dateDayMonthInIdentifier(ctx *Context, start, end int) bool {
+	s := ctx.Lower
+	from := start - 16
+	if from < 0 {
+		from = 0
+	}
+	for _, w := range dateIdentifierLeft {
+		if lastAnchor(s, from, start, w) >= 0 {
+			return true
+		}
+	}
+	to := end + 12
+	if to > len(s) {
+		to = len(s)
+	}
+	right := s[end:to]
+	for _, w := range dateIdentifierRight {
+		if strings.HasPrefix(right, w) && text.IsBoundary(s, end+len(w)) {
+			return true
+		}
+	}
+	for _, t := range ctx.Tokens {
+		if t.Start >= end && t.End <= to && t.Kind == text.KindNumber && t.Len() == 6 {
+			return true
+		}
+	}
+	return false
+}
+
+// classifyNoYear типизирует дату без года. Явный якорь обязателен: без года
+// не остаётся ни проверки правдоподобия, ни возрастного теста, то есть ни
+// одного запасного свидетельства. Никаких heuristic-веток (nameBefore,
+// dateConfBare, propagate) здесь нет и быть не должно — такой span либо
+// привязан к явной метке, либо не существует.
+//
+// hasNegativeContext здесь вызывается БЕЗУСЛОВНО, а не в default-ветке, как
+// в classify, и это ключевое отличие двух функций (риск R-6). Пара из двух
+// чисел <= 12 собственного свидетельства не имеет ВООБЩЕ: "1.2", "10.05",
+// "12/05", "15 07", "09/28" — это версия, сумма, номер договора, строка
+// таблицы и срок действия карты. Поэтому для формы без года слово
+// "версия"/"сумма"/"договор"/"срок" отменяет якорь, а не наоборот, и правая
+// проверка единиц (dateRightNegatives) работает здесь точно так же.
+func (d dateDetector) classifyNoYear(ctx *Context, start, end int, hint string) (pd.Span, bool) {
+	var typ pd.Type
+	switch dateAnchorAt(ctx.Lower, start) {
+	case anchorBirth:
+		typ = pd.TypeBirthDate
+	case anchorIssue:
+		typ = pd.TypePassportIssueDate
+	default:
+		return pd.Span{}, false
+	}
+	if hasNegativeContext(ctx.Lower, start, end) {
+		return pd.Span{}, false
+	}
+	if !ctx.Enabled(typ) {
+		return pd.Span{}, false
+	}
+	return pd.Span{Start: start, End: end, Type: typ,
+		Conf: dateConfNoYear, Src: "date", Hint: hint}, true
+}
+
 // textual handles "12 мая 1990" and its abbreviated and oblique-case forms
 // ("12 янв. 90", "12 январём 1990"). The month word is validated against the
 // dictionary, which carries every case form, so an arbitrary word here costs
@@ -329,42 +562,58 @@ func (d dateDetector) numeric(ctx *Context, out []pd.Span, now int) []pd.Span {
 func (d dateDetector) textual(ctx *Context, out []pd.Span, now int, gate *int8) []pd.Span {
 	s := ctx.Lower
 	toks := ctx.Tokens
-	for i := 0; i+4 < len(toks); i++ {
+	for i := 0; i+2 < len(toks); i++ {
 		g1 := toks[i]
 		if g1.Kind != text.KindNumber || g1.Len() > 2 {
 			continue
 		}
-		if !dateInlineSpace(s, toks[i+1]) {
-			continue
-		}
-		w := toks[i+2]
-		if w.Kind != text.KindWord || w.Len() < 6 || w.Len() > 20 {
-			continue
-		}
-		mon, ok := monthNumber(s[w.Start:w.End])
+		sepA, j, ok := dateWordSepAt(s, toks, i+1)
 		if !ok {
 			continue
 		}
-		j := i + 3
-		if j < len(toks) && dateIsDot(s, toks[j]) {
-			j++
-		}
-		if j+1 >= len(toks) || !dateInlineSpace(s, toks[j]) {
+		w := toks[j]
+		if w.Kind != text.KindWord || w.Len() < 3 || w.Len() > 20 {
 			continue
 		}
-		j++
-		year, yEnd, last, word, ok := dateTailYear(ctx, j, now, gate)
+		mon, ok := 0, false
+		if w.Len() >= 6 { // настоящий месяц: минимум "янв" = 6 байт
+			mon, ok = monthNumber(s[w.Start:w.End])
+		}
 		if !ok {
-			continue
+			if !dateMonthPlaceholder[s[w.Start:w.End]] {
+				continue
+			}
+			mon = 0 // месяц неизвестен: заглушка формы
 		}
 		day, err := strconv.Atoi(s[g1.Start:g1.End])
-		if err != nil || !validCalendar(day, mon, year) {
+		if err != nil {
 			continue
 		}
-		if word && !dateWordYearAllowed(ctx, g1.Start, yEnd) {
+		// Год необязателен. Разбор жадный: сначала пробуем полную форму, и
+		// только если она не сложилась, откатываемся к форме без года.
+		end, year, hint := w.End, 0, "text" // форма без года
+		last := j                           // индекс токена месяца, не ноль
+		k := j + 1                          // разделитель после месяца
+		if k < len(toks) && dateIsDot(s, toks[k]) {
+			k++ // сокращение месяца: "12 янв. 1990"
+		}
+		if sepB, k2, ok := dateWordSepAt(s, toks, k); ok && sepB == sepA {
+			if y, yEnd, lastTok, word, ok := dateTailYear(ctx, k2, now, gate); ok {
+				if word && !dateWordYearAllowed(ctx, g1.Start, yEnd) {
+					continue
+				}
+				end, year, last = yEnd, y, lastTok
+			}
+		}
+		if !dateValidDayMonth(day, mon, year, now) {
 			continue
 		}
-		sp, ok := d.classify(ctx, g1.Start, yEnd, year, now, "text", false)
+		var sp pd.Span
+		if year != 0 {
+			sp, ok = d.classify(ctx, g1.Start, end, year, now, hint, false)
+		} else {
+			sp, ok = d.classifyNoYear(ctx, g1.Start, end, "dm")
+		}
 		if !ok {
 			continue
 		}
@@ -372,6 +621,29 @@ func (d dateDetector) textual(ctx *Context, out []pd.Span, now int, gate *int8) 
 		i = last
 	}
 	return out
+}
+
+// dateValidDayMonth validates a day/month pair, with or without a year. When
+// the year is known the full calendar check applies; without a year February
+// gets 29 days (maxDaysInMonth). A placeholder month (mon == 0) only bounds the
+// day by 31 and, when a year is present, checks the year's plausibility.
+func dateValidDayMonth(day, mon, year, now int) bool {
+	if day < 1 {
+		return false
+	}
+	if mon == 0 {
+		if day > 31 {
+			return false
+		}
+		return year == 0 || (year >= dateMinYear && year <= now)
+	}
+	if mon < 1 || mon > 12 {
+		return false
+	}
+	if year != 0 {
+		return validCalendar(day, mon, year)
+	}
+	return day <= maxDaysInMonth(mon)
 }
 
 // tokenScan carries the two shapes that are driven by whole tokens rather than
@@ -505,7 +777,7 @@ func (d dateDetector) classify(ctx *Context, start, end, year, now int, hint str
 	}
 	var typ pd.Type
 	var conf float64
-	switch leftAnchor(ctx.Lower, start) {
+	switch dateAnchorAt(ctx.Lower, start) {
 	case anchorBirth:
 		typ, conf = pd.TypeBirthDate, dateConfAnchored
 	case anchorIssue:
@@ -596,6 +868,11 @@ func datePropagate(ctx *Context, spans []pd.Span) {
 		for j := range spans {
 			if spans[j].Conf < dateConfStrongFloor-dateConfEps {
 				continue
+			}
+			if spans[j].Hint == "dm" {
+				continue // частичная дата донором не бывает: у неё нет года,
+				// а вместе с ним нет и возрастного теста, которым
+				// datePropagate оправдывает заимствование типа
 			}
 			if gap := dateGap(spans[i], spans[j]); gap < bestGap {
 				best, bestGap = j, gap
@@ -693,6 +970,107 @@ func leftAnchor(lower string, start int) dateAnchor {
 		}
 	}
 	return kind
+}
+
+// dateCleanRun сообщает, что lower[from:to) не содержит ни одной цифры, ни
+// одного разрыва предложения и ни одного разрыва предикации. Это и есть та
+// проверка, которая делает широкое окно безопасным: метка не имеет права
+// перепрыгнуть через более близкое число ("Дата рождения 12.05.1990,
+// заявление подано 01.09.2005" — между меткой и второй датой стоят цифры
+// первой), не имеет права дотянуться из предыдущего предложения и не имеет
+// права дотянуться из соседней предикации внутри того же предложения.
+//
+// Отвергается run, в котором встретился хотя бы один байт из:
+//
+//	цифра 0..9                — между меткой и значением есть другое число
+//	'.' ';' '!' '?' '\n' '\r' — конец предложения (точка отвергается
+//	                            безусловно, а не эвристикой dateSentenceBreak:
+//	                            "гр. Иванова" между меткой и значением —
+//	                            повод отказаться, а не повод угадывать)
+//	',' '(' ')'               — разрыв предикации, см. ниже
+//	'—' '–', а также '-' В ОКРУЖЕНИИ ПРОБЕЛОВ — тире как разрыв предикации.
+//	                            Дефис ВНУТРИ слова ("финансово-кредитной")
+//	                            разрывом не считается и run не портит.
+//
+// Двоеточие ':' — единственный знак препинания, который РАЗРЕШЁН.
+//
+// Запятая и тире — несущая часть проверки, а не косметика (риск R-1).
+// Дальнобойность метки законна ровно в одном синтаксическом случае: когда
+// между меткой и значением стоит ИМЕННАЯ ГРУППА в родительном падеже,
+// которую печатает бланк ("Дата выдачи паспорта представителя клиента:
+// 10.03.15"). Такая группа не содержит ни запятой, ни тире. Запятая же
+// означает новую предикацию — и именно в ней живёт тот самый крупнейший
+// источник ложных срабатываний, который зафиксирован в шапке date.go
+// (пункт 3, строки 16–18):
+//
+//	"Дата рождения не указана, заявление подано 01.09.2024"
+//	                         ^^^ запятая — граница; справа бизнес-дата
+//
+// Двоеточие потому и разрешено, что им бланк заканчивает саму метку: все
+// семь позитивов класса D имеют перед значением ровно ": ".
+//
+// Союз в промежутке ("и", "а", "но", "или", "либо") проверяется тем же
+// правилом, что и метка, — по границам слова: именная группа бланка союзов
+// не содержит.
+func dateCleanRun(lower string, from, to int) bool {
+	if from < 0 || to > len(lower) || from >= to {
+		return false
+	}
+	for i := from; i < to; i++ {
+		switch c := lower[i]; {
+		case c >= '0' && c <= '9':
+			return false
+		case c == '.' || c == ';' || c == '!' || c == '?' || c == '\n' || c == '\r':
+			return false
+		case c == ',' || c == '(' || c == ')':
+			return false
+		case c == 0xE2 && i+2 < to && lower[i+1] == 0x80 && (lower[i+2] == 0x94 || lower[i+2] == 0x93):
+			// '—' (U+2014) и '–' (U+2013) — тире как разрыв предикации.
+			return false
+		case c == '-':
+			// Дефис внутри слова ("финансово-кредитной") разрывом не
+			// считается; тире в окружении пробелов — разрыв предикации.
+			if i > from && i+1 < to && lower[i-1] == ' ' && lower[i+1] == ' ' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// dateLabelAnchor — дальнобойный напарник leftAnchor, ограниченный явными
+// метками поля и чистым промежутком. Побеждает ближайшая метка, как и в
+// leftAnchor.
+func dateLabelAnchor(lower string, start int) dateAnchor {
+	from := start - dateLabelWindow
+	if from < 0 {
+		from = 0
+	}
+	best, bestEnd, kind := -1, -1, anchorNone
+	for _, a := range dateBirthLabels {
+		if i := lastAnchor(lower, from, start, a); i > best {
+			best, bestEnd, kind = i, i+len(a), anchorBirth
+		}
+	}
+	for _, a := range dateIssueLabels {
+		if i := lastAnchor(lower, from, start, a); i > best {
+			best, bestEnd, kind = i, i+len(a), anchorIssue
+		}
+	}
+	if best < 0 || !dateCleanRun(lower, bestEnd, start) {
+		return anchorNone
+	}
+	return kind
+}
+
+// dateAnchorAt — то, что теперь спрашивают classify и новые правила:
+// сначала обычный leftAnchor, и только если он молчит — dateLabelAnchor.
+// Порядок важен: ближний якорь должен по-прежнему побеждать дальний.
+func dateAnchorAt(lower string, start int) dateAnchor {
+	if a := leftAnchor(lower, start); a != anchorNone {
+		return a
+	}
+	return dateLabelAnchor(lower, start)
 }
 
 // lastAnchor returns the largest offset in [from,to) at which phrase occurs on
@@ -868,6 +1246,32 @@ func dateSepAt(s string, toks []text.Token, j int) (sep byte, next int, ok bool)
 		return 0, 0, false
 	}
 	return sep, j, true
+}
+
+// dateWordSepAt — разделитель между числовым днём и словом месяца (и между
+// месяцем и годом). Принимаются РОВНО две записи: один горизонтальный пробел
+// (sep = ' ') или один дефис (sep = '-'). Точка и слэш сюда не допущены
+// намеренно: точка уже занята сокращением месяца ("12 янв. 1990"), а слэш со
+// словесным месяцем не встречается. Вызывающий обязан требовать ОДИН И ТОТ ЖЕ
+// разделитель с обеих сторон месяца, так что "15-янв 1990" датой не станет.
+func dateWordSepAt(s string, toks []text.Token, j int) (sep byte, next int, ok bool) {
+	if j >= len(toks) {
+		return 0, 0, false
+	}
+	t := toks[j]
+	switch t.Kind {
+	case text.KindSpace:
+		if t.Len() != 1 || s[t.Start] != ' ' {
+			return 0, 0, false
+		}
+		return ' ', j + 1, true
+	case text.KindPunct:
+		if t.Len() != 1 || s[t.Start] != '-' {
+			return 0, 0, false
+		}
+		return '-', j + 1, true
+	}
+	return 0, 0, false
 }
 
 // dateIsDot reports whether a token is a lone '.', the optional dot of an
@@ -1136,6 +1540,21 @@ func daysInMonth(month, year int) int {
 	return 0
 }
 
+// maxDaysInMonth — daysInMonth для НЕИЗВЕСТНОГО года: февралю достаётся 29.
+// Именно это отличие спасает date-ext-034 "Дата рождения 31.02.1990":
+// 31 > 29, пара "31.02" невалидна и без года.
+func maxDaysInMonth(month int) int {
+	switch month {
+	case 1, 3, 5, 7, 8, 10, 12:
+		return 31
+	case 4, 6, 9, 11:
+		return 30
+	case 2:
+		return 29
+	}
+	return 0
+}
+
 // isLeapYear implements the full Gregorian rule; the century exceptions matter
 // because 1900 is inside our plausible range.
 func isLeapYear(year int) bool {
@@ -1328,6 +1747,17 @@ func dateYearOrdinal(w string) (int, bool) {
 	}
 	n, ok := dateYearOrdinalFallback[w]
 	return n, ok
+}
+
+// dateMonthPlaceholder — заглушки, которые бланк печатает в слоте месяца,
+// когда поле не заполнено: "15 Mмм 1990" (латинская M + кириллические мм).
+// День и год при такой заглушке — настоящие ПД, поэтому значение маскируется.
+//
+// Двухбуквенные формы ("мм", "mm") в список НЕ входят намеренно: "15 мм" —
+// это миллиметры, и такое правило начало бы маскировать размеры. Трёхбуквенная
+// заглушка единицей измерения не бывает.
+var dateMonthPlaceholder = map[string]bool{
+	"mмм": true, "ммм": true, "mmm": true,
 }
 
 // dateMonthFallback lists the nominative, genitive, prepositional, dative and

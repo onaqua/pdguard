@@ -12,7 +12,7 @@
   },
   "store": {
     "shards": 256,
-    "ttl_seconds": 600,
+    "ttl_seconds": 1800,
     "max_entries": 1000000,
     "max_value_bytes": 8388608,
     "max_bytes": 1073741824

@@ -42,6 +42,9 @@ func (fioDetector) Detect(ctx *Context) []pd.Span {
 	if ctx.Enabled == nil || ctx.Enabled(pd.TypeCardHolder) {
 		out = fioScanHolders(ctx, out)
 	}
+	if ctx.Enabled == nil || ctx.Enabled(pd.TypeFIO) || ctx.Enabled(pd.TypeCardHolder) {
+		out = fioScanValues(ctx, out)
+	}
 	return out
 }
 
@@ -132,6 +135,31 @@ const (
 	fioConfHolderDic   = 0.95
 )
 
+// Конверты значения. Порог config-а для FIO и CARD_HOLDER — 0.70, поэтому
+// самое слабое правило здесь стоит выше него, но ниже любой словарной формы,
+// которую выдают ветви A–E.
+const (
+	fioConfStandalone = 0.93 // весь payload — одно значение
+	fioConfLabel      = 0.88 // значение поля после «метка:»
+	fioConfAnchored   = 0.82 // значение сразу за сильным ролевым якорем
+	fioConfValueWeak  = 0.74 // тот же конверт, но свидетельство только регистр
+)
+
+// fioValueMaxAtoms — сколько атомов может содержать одно значение. Три:
+// фамилия, имя, отчество, и ни одной части больше; четвёртое слово — это уже
+// проза, а не поле формы.
+const fioValueMaxAtoms = 3
+
+// fioValueMaxBytes — предел длины значения. 96 байт = 48 кириллических букв:
+// всё ещё меньше любого предложения корпуса, но с запасом для
+// «Жан-Батист О'Коннор Д'Артаньянович» (63 байта).
+const fioValueMaxBytes = 96
+
+// fioValueSeps — разделители внутри составного атома. Дефис уже склеивает
+// fioReadComponent; слэш и апостроф добавлены ТОЛЬКО здесь, чтобы не менять
+// поведение ветвей A–E на всём остальном корпусе.
+const fioValueSeps = "-/'\u2019"
+
 // fioSpaceCutset в исходном коде выглядит так (последний символ —
 // неразрывный пробел U+00A0, которым полны вставленные из форм данные).
 // Побайтно этот литерал равен 0x20 0x09 0x0D 0x0A 0xC2 0xA0. Невидимый
@@ -158,6 +186,10 @@ type fioMatch struct {
 	// surname is the lowercased surname component, used by the public-figure
 	// veto. Empty when the pattern has no surname (name + patronymic).
 	surname string
+	// standalone marks a value envelope (R1) whose whole payload is one name.
+	// It lets the public-figure veto be lifted only when the surname is a
+	// dictionary surname, so «Салтыков-Щедрин» masks but «Пушкин» does not.
+	standalone bool
 }
 
 // fioComp is one name component: a word, possibly a hyphenated compound such
@@ -842,7 +874,17 @@ func fioVetoed(ctx *Context, tokIdx int, m fioMatch) bool {
 	if !fioFamous(ctx, tokIdx, m) {
 		return false
 	}
-	return !fioStrongClientAnchorLeft(ctx, tokIdx, m.start)
+	return !(m.standalone && fioValueSurnameKnown(m) ||
+		fioStrongClientAnchorLeft(ctx, tokIdx, m.start))
+}
+
+// fioValueSurnameKnown: хотя бы одна дефисная часть фамильного компонента
+// значения есть в СЛОВАРЕ фамилий. Ровно этим «Салтыков-Щедрин» отличается
+// от «Пушкин».
+func fioValueSurnameKnown(m fioMatch) bool {
+	return fioAnyPart(m.surname, func(p string) bool {
+		return fioNameForms(p)&dict.NameSurname != 0
+	})
 }
 
 // fioStrongClientAnchorLeft: сильный якорь — слово, которое может вводить
@@ -1405,3 +1447,337 @@ var fioLatinNoise = fioSet([]string{
 	"usd", "eur", "rub", "rur", "approved", "declined", "success", "error",
 	"the", "and", "for", "swift", "iban", "bic",
 })
+
+// fioNoCaseSignal сообщает, что регистр в payload не несёт информации: текст
+// целиком строчный ЛИБО целиком заглавный. Второе так же важно, как первое:
+// в «КЛИЕНТ ИВАН ЗАПРОСИЛ ПЕРЕВЫПУСК КАРТЫ» заглавная буква стоит у каждого
+// слова, и принимать её за свидетельство — значит съесть два обычных слова
+// вместе с именем.
+func fioNoCaseSignal(ctx *Context) bool {
+	if ctx.Text == ctx.Lower {
+		return true
+	}
+	for _, r := range ctx.Text {
+		if unicode.IsLetter(r) && !unicode.IsUpper(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// fioValueRun — прочитанный прогон атомов значения.
+type fioValueRun struct {
+	start, end int
+	lastTok    int
+	atoms      int    // всего атомов, 1..fioValueMaxAtoms
+	full       int    // из них полных слов (не инициалов)
+	dictSeen   bool   // хотя бы один атом подтверждён словарём или морфологией
+	latinOnly  bool   // все атомы латинские -> CARD_HOLDER, иначе FIO
+	surname    string // последний полный атом, для вето знаменитости
+}
+
+// fioReadValueComp — fioReadComponent с расширенным набором разделителей
+// (fioValueSeps) и с цепочкой из нескольких разделителей. Отдельная функция,
+// а не параметр существующей, именно чтобы ветви A–E остались нетронутыми.
+func fioReadValueComp(ctx *Context, cls []fioClass, i int) (fioComp, bool) {
+	toks := ctx.Tokens
+	if i >= len(toks) || toks[i].Kind != text.KindWord {
+		return fioComp{}, false
+	}
+	t := toks[i]
+	c := fioComp{start: t.Start, end: t.End, tok: i, lastTok: i}
+	j := i
+	for j+2 < len(toks) {
+		sep, nxt := toks[j+1], toks[j+2]
+		if sep.Kind != text.KindPunct || sep.Start != c.end ||
+			!strings.Contains(fioValueSeps, ctx.Text[sep.Start:sep.End]) {
+			break
+		}
+		if nxt.Kind != text.KindWord || nxt.Start != sep.End {
+			break
+		}
+		c.end = nxt.End
+		c.lastTok = j + 2
+		j += 2
+	}
+	c.lower = ctx.Lower[c.start:c.end]
+	c.cls = fioClassify(cls, i, c.lower)
+	return c, true
+}
+
+// fioValueParts разбивает атом по fioValueSeps на части.
+func fioValueParts(w string) []string {
+	return strings.FieldsFunc(w, func(r rune) bool {
+		return strings.ContainsRune(fioValueSeps, r)
+	})
+}
+
+// fioValueBadWord: слово, которое не может быть частью имени — стоп-слово,
+// топоним, страна, гражданство, организация, эмитент, тип улицы, месяц,
+// правовая форма или негативный контекст.
+func fioValueBadWord(w string) bool {
+	if dict.IsStopWord(w) || dict.IsCity(w) || dict.IsCityForm(w) ||
+		dict.IsCountry(w) || dict.IsCitizenship(w) || dict.IsOrgWord(w) ||
+		dict.IsIssuerWord(w) || dict.IsStreetType(w) {
+		return true
+	}
+	if _, isMonth := dict.Month(w); isMonth {
+		return true
+	}
+	if _, isLegal := fioLegalForm[w]; isLegal {
+		return true
+	}
+	if _, isNeg := fioNegContext[w]; isNeg {
+		return true
+	}
+	return false
+}
+
+// fioValueAdjective: слово с прилагательным окончанием не может быть именем.
+func fioValueAdjective(w string) bool {
+	for _, suf := range fioAdjectiveEndings {
+		if strings.HasSuffix(w, suf) {
+			return true
+		}
+	}
+	return false
+}
+
+// fioValueAtomOK судит один ПОЛНЫЙ атом значения (инициалы судятся отдельно).
+// Возвращает (принят, подтверждён словарём).
+func fioValueAtomOK(ctx *Context, cls []fioClass, c fioComp, noCase bool) (bool, bool) {
+	if !fioIsCyrillic(ctx, cls, c.tok) && !text.IsLatinWord(c.lower) {
+		return false, false
+	}
+	if fioRunes(c.lower) < 2 {
+		return false, false
+	}
+	parts := fioValueParts(c.lower)
+	for _, p := range parts {
+		if fioRunes(p) >= 2 && fioValueBadWord(p) {
+			return false, false
+		}
+	}
+	if fioValueBadWord(c.lower) {
+		return false, false
+	}
+	dictSeen := false
+	for _, p := range parts {
+		if fioNameForms(p) != 0 || fioLooksLikeSurname(p) || dict.IsLatinName(p) {
+			dictSeen = true
+			break
+		}
+	}
+	if !dictSeen {
+		if fioNameForms(c.lower) != 0 || fioLooksLikeSurname(c.lower) || dict.IsLatinName(c.lower) {
+			dictSeen = true
+		}
+	}
+	if dictSeen {
+		return true, true
+	}
+	if !noCase && text.IsUpperFirst(ctx.Text[c.start:c.end]) && !fioValueAdjective(c.lower) {
+		return true, false
+	}
+	return false, false
+}
+
+// fioReadValueRun читает прогон атомов, начиная с токена tok.
+func fioReadValueRun(ctx *Context, cls []fioClass, tok int, noCase bool) (fioValueRun, bool) {
+	var run fioValueRun
+	run.start = ctx.Tokens[tok].Start
+	run.lastTok = tok
+	run.latinOnly = true
+	first := true
+	prevInitial := ""
+	for run.atoms < fioValueMaxAtoms {
+		t := ctx.Tokens[run.lastTok]
+		if t.Kind != text.KindWord {
+			break
+		}
+		s := ctx.Text[t.Start:t.End]
+		if fioOneRune(s) {
+			if run.lastTok+1 >= len(ctx.Tokens) {
+				break
+			}
+			dot := ctx.Tokens[run.lastTok+1]
+			if dot.Kind != text.KindPunct || dot.Start != t.End || ctx.Text[dot.Start:dot.End] != "." {
+				break
+			}
+			if first && !text.IsUpperFirst(s) {
+				break
+			}
+			letter := ctx.Lower[t.Start:t.End]
+			if prevInitial != "" {
+				if _, bad := fioAbbrevPair[prevInitial+"."+letter]; bad {
+					break
+				}
+			}
+			prevInitial = letter
+			run.atoms++
+			run.end = dot.End
+			run.lastTok = run.lastTok + 1
+			if !text.IsLatinWord(s) {
+				run.latinOnly = false
+			}
+			first = false
+			if run.lastTok+1 < len(ctx.Tokens) && fioIsNameGap(ctx, ctx.Tokens[run.lastTok+1]) {
+				run.lastTok++
+			} else {
+				break
+			}
+			continue
+		}
+		c, ok := fioReadValueComp(ctx, cls, run.lastTok)
+		if !ok {
+			break
+		}
+		accepted, dictSeen := fioValueAtomOK(ctx, cls, c, noCase)
+		if !accepted {
+			break
+		}
+		run.atoms++
+		run.full++
+		if dictSeen {
+			run.dictSeen = true
+		}
+		if !text.IsLatinWord(c.lower) {
+			run.latinOnly = false
+		}
+		run.surname = c.lower
+		run.end = c.end
+		run.lastTok = c.lastTok
+		prevInitial = ""
+		first = false
+		if run.lastTok+1 < len(ctx.Tokens) && fioIsNameGap(ctx, ctx.Tokens[run.lastTok+1]) {
+			run.lastTok++
+		} else {
+			break
+		}
+	}
+	if run.atoms == 0 {
+		return fioValueRun{}, false
+	}
+	return run, true
+}
+
+// fioValueTerminated проверяет правую границу прогона для конвертов R1 и R2.
+// После последнего атома допускаются только пробелы, а затем ровно одно из:
+// конец payload, запятая, или точка конца предложения.
+func fioValueTerminated(ctx *Context, run fioValueRun) bool {
+	i := run.lastTok + 1
+	for i < len(ctx.Tokens) && ctx.Tokens[i].Kind == text.KindSpace {
+		i++
+	}
+	if i >= len(ctx.Tokens) {
+		return true
+	}
+	t := ctx.Tokens[i]
+	if t.Kind != text.KindPunct {
+		return false
+	}
+	s := ctx.Text[t.Start:t.End]
+	if s == "," {
+		return true
+	}
+	if s == "." {
+		if i > 0 && ctx.Tokens[i-1].Kind == text.KindPunct &&
+			ctx.Text[ctx.Tokens[i-1].Start:ctx.Tokens[i-1].End] == "." {
+			return true
+		}
+		if !fioAbbrevDot(ctx, i) {
+			if i+1 >= len(ctx.Tokens) || ctx.Tokens[i+1].Kind == text.KindSpace {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// fioStandaloneBounds возвращает границы payload без окружающих пробелов,
+// ok = false, если в payload есть перевод строки или он длиннее
+// fioValueMaxBytes.
+func fioStandaloneBounds(ctx *Context) (lo, hi int, ok bool) {
+	s := ctx.Text
+	trimmed := strings.Trim(s, fioSpaceCutset)
+	if trimmed == "" {
+		return 0, 0, false
+	}
+	lo = len(s) - len(strings.TrimLeft(s, fioSpaceCutset))
+	hi = lo + len(trimmed)
+	if strings.ContainsAny(trimmed, "\n\r") {
+		return 0, 0, false
+	}
+	if len(trimmed) > fioValueMaxBytes {
+		return 0, 0, false
+	}
+	return lo, hi, true
+}
+
+// fioValueRunAccepted — условие приёма прогона (§2.4-бис) для конверта R1.
+// Слабый прогон (только регистровое свидетельство) обязан иметь atoms >= 2,
+// иначе одиночное заглавное обычное слово («Версия», «Заказ») маскируется.
+func fioValueRunAccepted(run fioValueRun) bool {
+	if run.dictSeen {
+		return true
+	}
+	return run.atoms >= 2
+}
+
+// fioScanValues — третий проход детектора, рядом с fioScanRussian и
+// fioScanHolders. Реализует конверт R1: весь payload целиком является одним
+// значением.
+func fioScanValues(ctx *Context, out []pd.Span) []pd.Span {
+	lo, _, ok := fioStandaloneBounds(ctx)
+	if !ok {
+		return out
+	}
+	tokIdx := ctx.TokenAt(lo)
+	if tokIdx < 0 {
+		return out
+	}
+	if ctx.Tokens[tokIdx].Kind != text.KindWord {
+		return out
+	}
+	cls := make([]fioClass, len(ctx.Tokens))
+	noCase := fioNoCaseSignal(ctx)
+	run, ok := fioReadValueRun(ctx, cls, tokIdx, noCase)
+	if !ok || run.start != lo {
+		return out
+	}
+	if !fioValueTerminated(ctx, run) {
+		return out
+	}
+	if !fioValueRunAccepted(run) {
+		return out
+	}
+	m := fioMatch{
+		start:      run.start,
+		end:        run.end,
+		lastTok:    run.lastTok,
+		surname:    run.surname,
+		standalone: true,
+	}
+	if fioVetoed(ctx, tokIdx, m) {
+		return out
+	}
+	for _, s := range out {
+		if run.start < s.End && s.Start < run.end {
+			return out
+		}
+	}
+	conf := fioConfStandalone
+	if !run.dictSeen {
+		conf = fioConfValueWeak
+	}
+	typ := pd.TypeFIO
+	hint := "value"
+	if run.latinOnly {
+		typ = pd.TypeCardHolder
+		hint = "holder_value"
+	}
+	out = append(out, pd.Span{
+		Start: run.start, End: run.end, Type: typ, Conf: conf, Src: "fio", Hint: hint,
+	})
+	return out
+}

@@ -343,6 +343,7 @@ func contactScanPhones(s string, out []pd.Span) []pd.Span {
 			continue
 		}
 		i = r.end
+		contactDropExportSuffix(s, &r)
 		start, conf, hint, needAnchor, ok := contactClassify(s, r)
 		if !ok {
 			continue
@@ -436,6 +437,37 @@ func contactSepRun(s string, i int) (int, bool, bool) {
 		return i, false, false
 	}
 	return j, dot, true
+}
+
+// contactDropExportSuffix removes a trailing ".0" from a telephone run when it
+// sits at the very end of the value. Spreadsheet exports leave a float artifact
+// on numbers, and a phone followed by ".0" must still be seen as the phone. The
+// suffix is dropped only when nothing but a boundary follows it, so a sum like
+// "4276.16" or a version like "1.2.30" is never touched.
+func contactDropExportSuffix(s string, r *contactRun) {
+	if r.end < 2 || s[r.end-1] != '0' || s[r.end-2] != '.' {
+		return
+	}
+	if r.end < len(s) {
+		switch s[r.end] {
+		case ' ', ',', '.':
+		default:
+			return
+		}
+	}
+	r.end -= 2
+	r.digits--
+	r.nGroups--
+	if r.nGroups < len(r.groups) {
+		r.groups[r.nGroups] = 0
+	}
+	r.hasDot = false
+	for p := r.start; p < r.end; p++ {
+		if s[p] == '.' {
+			r.hasDot = true
+			break
+		}
+	}
 }
 
 // contactClassify decides which telephone shape a run is, if any. The cases
