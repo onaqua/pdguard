@@ -331,6 +331,153 @@ func ppTokenFrom(ctx *Context, off int) int {
 	return sort.Search(len(ctx.Tokens), func(i int) bool { return ctx.Tokens[i].Start >= off })
 }
 
+// ppRoleGenitive are the genitive-case subjects that may stand between a
+// citizenship or birthplace anchor and its colon: "Гражданство поручителя: ...".
+var ppRoleGenitive = map[string]struct{}{
+	"поручителя": {}, "бенефициара": {}, "клиента": {}, "заемщика": {},
+	"заёмщика": {}, "созаемщика": {}, "созаёмщика": {}, "вкладчика": {},
+	"держателя": {}, "владельца": {}, "наследника": {},
+}
+
+// ppNextWordToken returns the index of the next KindWord token at or after i+1,
+// or -1 when there is none.
+func ppNextWordToken(ctx *Context, i int) int {
+	for i++; i < len(ctx.Tokens); i++ {
+		if ctx.Tokens[i].Kind == text.KindWord {
+			return i
+		}
+	}
+	return -1
+}
+
+// ppLeadSepRole returns the offset just past the colon that follows the anchor
+// ending at from, allowing between one and four role words — a genitive subject
+// and/or a "по ..." clarification — to stand between the anchor and the colon.
+// It returns -1 when the words between the anchor and the colon are not a valid
+// role phrase, when there is no colon, or when the phrase is longer than four
+// words. The plain "anchor: value" form is deliberately left to ppSkipLeadSep.
+func ppLeadSepRole(ctx *Context, from int) int {
+	i := ppTokenFrom(ctx, from)
+	words := 0
+	for i < len(ctx.Tokens) {
+		t := ctx.Tokens[i]
+		switch t.Kind {
+		case text.KindSpace:
+			i++
+			continue
+		case text.KindPunct:
+			if t.In(ctx.Text) == ":" {
+				if words >= 1 && words <= 4 {
+					return t.End
+				}
+				return -1
+			}
+			i++
+			continue
+		case text.KindWord:
+			w := t.In(ctx.Lower)
+			if _, ok := ppRoleGenitive[w]; ok {
+				words++
+				i++
+			} else if w == "доверенного" {
+				j := ppNextWordToken(ctx, i)
+				if j < 0 || ctx.Tokens[j].In(ctx.Lower) != "лица" {
+					return -1
+				}
+				words += 2
+				i = j + 1
+			} else if w == "по" {
+				j := ppNextWordToken(ctx, i)
+				if j < 0 {
+					return -1
+				}
+				nw := ctx.Tokens[j].In(ctx.Lower)
+				switch nw {
+				case "договору":
+					words += 2
+					i = j + 1
+					k := ppNextWordToken(ctx, j)
+					if k >= 0 && ctx.Tokens[k].In(ctx.Lower) == "страхования" {
+						words++
+						i = k + 1
+					}
+				case "кредиту", "вкладу":
+					words += 2
+					i = j + 1
+				default:
+					return -1
+				}
+			} else {
+				return -1
+			}
+			if words > 4 {
+				return -1
+			}
+		default:
+			return -1
+		}
+	}
+	return -1
+}
+
+// ppQuoteBefore reports whether the token immediately before pos is an opening
+// quote («, " or ').
+func ppQuoteBefore(ctx *Context, pos int) bool {
+	for i := ppTokenFrom(ctx, pos) - 1; i >= 0; i-- {
+		t := ctx.Tokens[i]
+		if t.Kind == text.KindSpace {
+			continue
+		}
+		if t.Kind == text.KindPunct {
+			q := t.In(ctx.Text)
+			return q == "«" || q == "\"" || q == "'"
+		}
+		return false
+	}
+	return false
+}
+
+// ppQuotedLabelLeadSep handles the form "в поле «Гражданство» указано: <value>"
+// (or "в графе ..."). The anchor is the label inside the quotes; after it come
+// the closing quote, the verb "указано"/"указан"/"указана"/"значится" and a
+// colon. It returns the offset just past the colon, or -1 when the pattern does
+// not hold.
+func ppQuotedLabelLeadSep(ctx *Context, start, end int) int {
+	if !ppQuoteBefore(ctx, start) {
+		return -1
+	}
+	i := ppTokenFrom(ctx, end)
+	for i < len(ctx.Tokens) && ctx.Tokens[i].Kind == text.KindSpace {
+		i++
+	}
+	if i >= len(ctx.Tokens) || ctx.Tokens[i].Kind != text.KindPunct {
+		return -1
+	}
+	q := ctx.Tokens[i].In(ctx.Text)
+	if q != "»" && q != "\"" && q != "'" {
+		return -1
+	}
+	i++
+	for i < len(ctx.Tokens) && ctx.Tokens[i].Kind == text.KindSpace {
+		i++
+	}
+	if i >= len(ctx.Tokens) || ctx.Tokens[i].Kind != text.KindWord {
+		return -1
+	}
+	w := ctx.Tokens[i].In(ctx.Lower)
+	if w != "указано" && w != "указан" && w != "указана" && w != "значится" {
+		return -1
+	}
+	i++
+	for i < len(ctx.Tokens) && ctx.Tokens[i].Kind == text.KindSpace {
+		i++
+	}
+	if i >= len(ctx.Tokens) || ctx.Tokens[i].Kind != text.KindPunct || ctx.Tokens[i].In(ctx.Text) != ":" {
+		return -1
+	}
+	return ctx.Tokens[i].End
+}
+
 // ppWordAfter returns the lower-cased word that follows off, or "" when the
 // next non-space token is not a word.
 func ppWordAfter(ctx *Context, off int) string {
@@ -1668,6 +1815,26 @@ func (d passportDetector) birthPlace(ctx *Context, out []pd.Span) []pd.Span {
 		if FamousMentionLeft(ctx, start) {
 			return
 		}
+		// Quoted-label form: «Место рождения» указано: <value>.
+		if q := ppQuotedLabelLeadSep(ctx, start, end); q >= 0 {
+			if s, e, ok := ppBirthPlaceSpan(ctx, q); ok {
+				out = append(out, pd.Span{
+					Start: s, End: e, Type: pd.TypeBirthPlace,
+					Conf: ppConfBirthPlace, Src: detectorPassport, Hint: "birth_place",
+				})
+				return
+			}
+		}
+		// Role-colon form: Место рождения поручителя: <value>.
+		if r := ppLeadSepRole(ctx, end); r >= 0 {
+			if s, e, ok := ppBirthPlaceSpan(ctx, r); ok {
+				out = append(out, pd.Span{
+					Start: s, End: e, Type: pd.TypeBirthPlace,
+					Conf: ppConfBirthPlace, Src: detectorPassport, Hint: "birth_place",
+				})
+				return
+			}
+		}
 		s, e, ok := ppBirthPlaceSpan(ctx, ppSkipLeadSep(ctx.Text, end))
 		if !ok {
 			return
@@ -1795,6 +1962,26 @@ func (d passportDetector) citizenship(ctx *Context, out []pd.Span) []pd.Span {
 	ppFindStems(ctx.Lower, ppCitizenshipStems, func(_, start, end int) {
 		if !ppOnBoundaries(ctx.Text, start, end) {
 			return
+		}
+		// Quoted-label form: «Гражданство» указано: <value>.
+		if q := ppQuotedLabelLeadSep(ctx, start, end); q >= 0 {
+			if s, e, ok := ppCitizenshipSpan(ctx, q); ok {
+				out = append(out, pd.Span{
+					Start: s, End: e, Type: pd.TypeCitizenship,
+					Conf: ppConfCitizenship, Src: detectorPassport, Hint: "citizenship",
+				})
+				return
+			}
+		}
+		// Role-colon form: Гражданство поручителя: <value>.
+		if r := ppLeadSepRole(ctx, end); r >= 0 {
+			if s, e, ok := ppCitizenshipSpan(ctx, r); ok {
+				out = append(out, pd.Span{
+					Start: s, End: e, Type: pd.TypeCitizenship,
+					Conf: ppConfCitizenship, Src: detectorPassport, Hint: "citizenship",
+				})
+				return
+			}
 		}
 		if s, e, ok := ppCitizenshipSpan(ctx, ppSkipLeadSep(ctx.Text, end)); ok {
 			out = append(out, pd.Span{

@@ -1474,6 +1474,7 @@ type fioValueRun struct {
 	dictSeen   bool   // хотя бы один атом подтверждён словарём или морфологией
 	latinOnly  bool   // все атомы латинские -> CARD_HOLDER, иначе FIO
 	surname    string // последний полный атом, для вето знаменитости
+	firstLower string // первый полный атом, для латинского CARD_HOLDER
 }
 
 // fioReadValueComp — fioReadComponent с расширенным набором разделителей
@@ -1596,37 +1597,33 @@ func fioReadValueRun(ctx *Context, cls []fioClass, tok int, noCase bool) (fioVal
 			break
 		}
 		s := ctx.Text[t.Start:t.End]
-		if fioOneRune(s) {
-			if run.lastTok+1 >= len(ctx.Tokens) {
-				break
-			}
+		if fioOneRune(s) && run.lastTok+1 < len(ctx.Tokens) {
 			dot := ctx.Tokens[run.lastTok+1]
-			if dot.Kind != text.KindPunct || dot.Start != t.End || ctx.Text[dot.Start:dot.End] != "." {
-				break
-			}
-			if first && !text.IsUpperFirst(s) {
-				break
-			}
-			letter := ctx.Lower[t.Start:t.End]
-			if prevInitial != "" {
-				if _, bad := fioAbbrevPair[prevInitial+"."+letter]; bad {
+			if dot.Kind == text.KindPunct && dot.Start == t.End && ctx.Text[dot.Start:dot.End] == "." {
+				if first && !text.IsUpperFirst(s) {
 					break
 				}
+				letter := ctx.Lower[t.Start:t.End]
+				if prevInitial != "" {
+					if _, bad := fioAbbrevPair[prevInitial+"."+letter]; bad {
+						break
+					}
+				}
+				prevInitial = letter
+				run.atoms++
+				run.end = dot.End
+				run.lastTok = run.lastTok + 1
+				if !text.IsLatinWord(s) {
+					run.latinOnly = false
+				}
+				first = false
+				if run.lastTok+2 < len(ctx.Tokens) && fioIsNameGap(ctx, ctx.Tokens[run.lastTok+1]) {
+					run.lastTok += 2
+				} else {
+					break
+				}
+				continue
 			}
-			prevInitial = letter
-			run.atoms++
-			run.end = dot.End
-			run.lastTok = run.lastTok + 1
-			if !text.IsLatinWord(s) {
-				run.latinOnly = false
-			}
-			first = false
-			if run.lastTok+1 < len(ctx.Tokens) && fioIsNameGap(ctx, ctx.Tokens[run.lastTok+1]) {
-				run.lastTok++
-			} else {
-				break
-			}
-			continue
 		}
 		c, ok := fioReadValueComp(ctx, cls, run.lastTok)
 		if !ok {
@@ -1644,13 +1641,16 @@ func fioReadValueRun(ctx *Context, cls []fioClass, tok int, noCase bool) (fioVal
 		if !text.IsLatinWord(c.lower) {
 			run.latinOnly = false
 		}
+		if run.full == 1 {
+			run.firstLower = c.lower
+		}
 		run.surname = c.lower
 		run.end = c.end
 		run.lastTok = c.lastTok
 		prevInitial = ""
 		first = false
-		if run.lastTok+1 < len(ctx.Tokens) && fioIsNameGap(ctx, ctx.Tokens[run.lastTok+1]) {
-			run.lastTok++
+		if run.lastTok+2 < len(ctx.Tokens) && fioIsNameGap(ctx, ctx.Tokens[run.lastTok+1]) {
+			run.lastTok += 2
 		} else {
 			break
 		}
@@ -1718,66 +1718,279 @@ func fioStandaloneBounds(ctx *Context) (lo, hi int, ok bool) {
 // Слабый прогон (только регистровое свидетельство) обязан иметь atoms >= 2,
 // иначе одиночное заглавное обычное слово («Версия», «Заказ») маскируется.
 func fioValueRunAccepted(run fioValueRun) bool {
+	return fioValueRunAcceptedFor(run, false)
+}
+
+// fioValueRunAcceptedFor — условие приёма прогона (§2.4-бис), разведённое по
+// конвертам. allowSingleInitial разрешает одиночный инициал (atoms == 1,
+// full == 0) — это делает значением метка поля, а не сам инициал, поэтому
+// только конверт R2 его принимает. Во всех конвертах слабый прогон (только
+// регистровое свидетельство) обязан иметь atoms >= 2.
+func fioValueRunAcceptedFor(run fioValueRun, allowSingleInitial bool) bool {
 	if run.dictSeen {
 		return true
 	}
-	return run.atoms >= 2
+	if run.atoms >= 2 {
+		return true
+	}
+	return allowSingleInitial && run.atoms == 1 && run.full == 0
 }
 
-// fioScanValues — третий проход детектора, рядом с fioScanRussian и
-// fioScanHolders. Реализует конверт R1: весь payload целиком является одним
-// значением.
-func fioScanValues(ctx *Context, out []pd.Span) []pd.Span {
-	lo, _, ok := fioStandaloneBounds(ctx)
-	if !ok {
-		return out
+// fioValueLatinSurname: латинское значение принимается как CARD_HOLDER только
+// если первый полный атом читается как фамилия — апострофным составным
+// («O'Brien») или латинским фамильным окончанием («PETROV», «Sidorova»). Это
+// отделяет имя держателя карты от транслитерированного русского имени
+// «IVAN IVANOV», которое без карточного контекста маскировать нельзя.
+func fioValueLatinSurname(run fioValueRun) bool {
+	if run.firstLower == "" {
+		return false
 	}
-	tokIdx := ctx.TokenAt(lo)
-	if tokIdx < 0 {
-		return out
+	if strings.IndexByte(run.firstLower, '\'') >= 0 {
+		return true
 	}
-	if ctx.Tokens[tokIdx].Kind != text.KindWord {
-		return out
-	}
-	cls := make([]fioClass, len(ctx.Tokens))
-	noCase := fioNoCaseSignal(ctx)
-	run, ok := fioReadValueRun(ctx, cls, tokIdx, noCase)
-	if !ok || run.start != lo {
-		return out
-	}
-	if !fioValueTerminated(ctx, run) {
-		return out
-	}
-	if !fioValueRunAccepted(run) {
-		return out
-	}
-	m := fioMatch{
-		start:      run.start,
-		end:        run.end,
-		lastTok:    run.lastTok,
-		surname:    run.surname,
-		standalone: true,
-	}
-	if fioVetoed(ctx, tokIdx, m) {
-		return out
-	}
-	for _, s := range out {
-		if run.start < s.End && s.Start < run.end {
-			return out
+	for _, suf := range fioLatinSurnameSuffixes {
+		if strings.HasSuffix(run.firstLower, suf) {
+			return true
 		}
 	}
-	conf := fioConfStandalone
+	return false
+}
+
+// fioLatinSurnameSuffixes — окончания транслитерированных фамилий, по которым
+// латинское слово читается как фамилия, а не как имя. Намеренно узкий список:
+// он должен отличать «PETROV»/«Sidorova» от «IVAN»/«PETR»/«ANNA»/«JOHN».
+var fioLatinSurnameSuffixes = []string{
+	"ov", "ova", "ev", "eva", "in", "ina", "enko", "uk", "yuk", "ich",
+	"sky", "skaya", "ski", "ska", "yan",
+}
+
+// fioValueLabelStart проверяет, что двоеточие в токене i открывает поле, а не
+// адрес или время. Три структурных барьера (§2.6, §3А.4): токен слева от ':'
+// (игнорируя пробелы) обязан быть словом — иначе время открывает поле
+// («с 09:00 до 20:00»); за ':' обязан идти пробел или конец payload — иначе
+// «https://» открывает поле; слово слева не должно быть географическим,
+// издательским или негативным маркером.
+func fioValueLabelStart(ctx *Context, i int) bool {
+	j := i - 1
+	for j >= 0 && ctx.Tokens[j].Kind == text.KindSpace {
+		j--
+	}
+	if j < 0 || ctx.Tokens[j].Kind != text.KindWord {
+		return false
+	}
+	if i+1 < len(ctx.Tokens) && ctx.Tokens[i+1].Kind != text.KindSpace {
+		return false
+	}
+	w := ctx.Lower[ctx.Tokens[j].Start:ctx.Tokens[j].End]
+	if _, bad := fioGeoLeft[w]; bad {
+		return false
+	}
+	if dict.IsStreetType(w) || dict.IsIssuerWord(w) {
+		return false
+	}
+	if _, bad := fioNegContext[w]; bad {
+		return false
+	}
+	return true
+}
+
+// fioIsCapitalInitial: однобуквенное слово с приклеенной точкой, написанное
+// ЗАГЛАВНОЙ. Отличает значение от топонимической аббревиатуры («г.», «с.»,
+// «д.» пишутся строчными) и служит условием пропуска одного стоп-слова в R3.
+func fioIsCapitalInitial(ctx *Context, i int) bool {
+	t := ctx.Tokens[i]
+	if t.Kind != text.KindWord || !fioOneRune(ctx.Text[t.Start:t.End]) {
+		return false
+	}
+	if !text.IsUpperFirst(ctx.Text[t.Start:t.End]) {
+		return false
+	}
+	if i+1 >= len(ctx.Tokens) {
+		return false
+	}
+	dot := ctx.Tokens[i+1]
+	return dot.Kind == text.KindPunct && dot.Start == t.End &&
+		ctx.Text[dot.Start:dot.End] == "."
+}
+
+// fioValueOverlaps: спан нового конверта не должен пересекаться с уже
+// выданными спанами; Resolve всё равно снимет пересечения, но ранний отказ
+// дешевле и не даёт слабому правилу укоротить сильное.
+func fioValueOverlaps(out []pd.Span, start, end int) bool {
+	for _, s := range out {
+		if start < s.End && s.Start < end {
+			return true
+		}
+	}
+	return false
+}
+
+// fioEmitValue собирает спан из прогона значения. confStrong — уверенность
+// конверта при словарном свидетельстве; без него (только регистр) — слабая
+// fioConfValueWeak. Латинский прогон обязан читаться как фамилия, иначе это
+// транслитерированное имя без карточного контекста.
+func fioEmitValue(out []pd.Span, run fioValueRun, confStrong float64) []pd.Span {
+	conf := confStrong
 	if !run.dictSeen {
 		conf = fioConfValueWeak
 	}
 	typ := pd.TypeFIO
 	hint := "value"
 	if run.latinOnly {
+		// Одиночное латинское слово — не имя держателя карты: «Держатель
+		// карты: IVANOV» остаётся нетронутым. Имя держателя — минимум два
+		// атома, и первый из них обязан читаться как фамилия.
+		if run.atoms < 2 || !fioValueLatinSurname(run) {
+			return out
+		}
 		typ = pd.TypeCardHolder
 		hint = "holder_value"
 	}
-	out = append(out, pd.Span{
+	return append(out, pd.Span{
 		Start: run.start, End: run.end, Type: typ, Conf: conf, Src: "fio", Hint: hint,
 	})
+}
+
+// fioValueLastTok возвращает индекс токена последнего атома прогона. run.lastTok
+// указывает на следующий кандидат-токен (после пробельного зазора), а не на
+// последний атом, поэтому для fioOrgAdjacent нужен токен, заканчивающийся на
+// run.end.
+func fioValueLastTok(ctx *Context, run fioValueRun) int {
+	for i := len(ctx.Tokens) - 1; i >= 0; i-- {
+		if ctx.Tokens[i].End == run.end {
+			return i
+		}
+	}
+	return run.lastTok
+}
+
+// fioScanValues — третий проход детектора, рядом с fioScanRussian и
+// fioScanHolders. Реализует три конверта значения: R1 (весь payload — одно
+// значение), R2 (значение сразу после «метка:»), R3 (значение сразу за
+// сильным ролевым якорем).
+func fioScanValues(ctx *Context, out []pd.Span) []pd.Span {
+	cls := make([]fioClass, len(ctx.Tokens))
+	noCase := fioNoCaseSignal(ctx)
+
+	// R1 — fioValueStandalone. Весь payload (после обрезки пробелов и не более
+	// одной завершающей точки) есть один прогон атомов значения.
+	if lo, _, ok := fioStandaloneBounds(ctx); ok {
+		tokIdx := ctx.TokenAt(lo)
+		if tokIdx >= 0 && ctx.Tokens[tokIdx].Kind == text.KindWord {
+			run, ok := fioReadValueRun(ctx, cls, tokIdx, noCase)
+			if ok && run.start == lo && fioValueTerminated(ctx, run) &&
+				fioValueRunAccepted(run) {
+				m := fioMatch{
+					start:      run.start,
+					end:        run.end,
+					lastTok:    run.lastTok,
+					surname:    run.surname,
+					standalone: true,
+				}
+				if !fioVetoed(ctx, tokIdx, m) && !fioValueOverlaps(out, run.start, run.end) {
+					out = fioEmitValue(out, run, fioConfStandalone)
+				}
+			}
+		}
+	}
+
+	// R2 — fioValueLabel. Значение стоит сразу после ':', прошедшего
+	// fioValueLabelStart, и заканчивается концом payload, запятой или точкой
+	// конца предложения. Первый атом — непосредственно за двоеточием (ровно
+	// один пробельный токен); поиск «ближайшего слова дальше» запрещён.
+	for i := 0; i < len(ctx.Tokens); i++ {
+		t := ctx.Tokens[i]
+		if t.Kind != text.KindPunct || ctx.Text[t.Start:t.End] != ":" {
+			continue
+		}
+		if !fioValueLabelStart(ctx, i) {
+			continue
+		}
+		startTok := i + 1
+		if startTok >= len(ctx.Tokens) || ctx.Tokens[startTok].Kind != text.KindSpace {
+			continue
+		}
+		startTok++
+		if startTok >= len(ctx.Tokens) || ctx.Tokens[startTok].Kind != text.KindWord {
+			continue
+		}
+		run, ok := fioReadValueRun(ctx, cls, startTok, noCase)
+		if !ok || !fioValueTerminated(ctx, run) ||
+			!fioValueRunAcceptedFor(run, true) {
+			continue
+		}
+		m := fioMatch{
+			start:   run.start,
+			end:     run.end,
+			lastTok: fioValueLastTok(ctx, run),
+			surname: run.surname,
+		}
+		if fioVetoed(ctx, startTok, m) || fioValueOverlaps(out, run.start, run.end) {
+			continue
+		}
+		out = fioEmitValue(out, run, fioConfLabel)
+	}
+
+	// R3 — fioValueAnchored. Значение стоит сразу за сильным ролевым якорем
+	// (fioStrongAnchor) или за фразой из fioStrongPhraseAnchor, без двоеточия.
+	// Правая граница не проверяется: прогон и так обрывается на первом
+	// непринятом слове. Только fioStrongAnchor — замена на fioAnchor ломает
+	// четыре негатива («аудиторов», «постоянных», «ведущих экспертов»).
+	for i := 0; i < len(ctx.Tokens); i++ {
+		t := ctx.Tokens[i]
+		if t.Kind != text.KindWord {
+			continue
+		}
+		anchored := false
+		if _, yes := fioStrongAnchor[ctx.Lower[t.Start:t.End]]; yes {
+			anchored = true
+		} else {
+			win := strings.TrimRight(fioLeftWindow(ctx, t.Start, fioStrongWindow), fioSpaceCutset)
+			for _, p := range fioStrongPhraseAnchor {
+				if strings.HasSuffix(win, p) {
+					anchored = true
+					break
+				}
+			}
+		}
+		if !anchored {
+			continue
+		}
+		startTok := i + 1
+		if startTok < len(ctx.Tokens) && ctx.Tokens[startTok].Kind == text.KindSpace {
+			startTok++
+		}
+		if startTok >= len(ctx.Tokens) || ctx.Tokens[startTok].Kind != text.KindWord {
+			continue
+		}
+		// Пропуск ровно одного стоп-слова между якорем и значением — только
+		// если следующий за ним атом — заглавный инициал. Это держит
+		// «Отправитель документов и договоров не указан.» и «Владелец активов
+		// и вкладов пока не установлен.».
+		if dict.IsStopWord(ctx.Lower[ctx.Tokens[startTok].Start:ctx.Tokens[startTok].End]) {
+			next := startTok + 1
+			if next < len(ctx.Tokens) && ctx.Tokens[next].Kind == text.KindSpace {
+				next++
+			}
+			if next < len(ctx.Tokens) && fioIsCapitalInitial(ctx, next) {
+				startTok = next
+			}
+		}
+		run, ok := fioReadValueRun(ctx, cls, startTok, noCase)
+		if !ok || !fioValueRunAcceptedFor(run, false) {
+			continue
+		}
+		m := fioMatch{
+			start:   run.start,
+			end:     run.end,
+			lastTok: fioValueLastTok(ctx, run),
+			surname: run.surname,
+		}
+		if fioVetoed(ctx, startTok, m) || fioValueOverlaps(out, run.start, run.end) {
+			continue
+		}
+		out = fioEmitValue(out, run, fioConfAnchored)
+	}
+
 	return out
 }

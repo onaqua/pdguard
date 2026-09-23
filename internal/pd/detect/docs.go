@@ -155,7 +155,7 @@ var (
 	// The alternatives are ordered longest first: Go's regexp is leftmost-FIRST,
 	// so "номера" has to be offered before "номер" to be seen at all.
 	reDocDriverLicense = regexp.MustCompile(
-		`[0-9]{2} ?[0-9]{2} ?(?:(?:номера|номером|номер|№|#|no|n)\.? ?)?[0-9]{6}`)
+		`[0-9]{2}[ \t]{0,32}[0-9]{2}[ \t]{0,32}(?:(?:номера|номером|номер|№|#|no|n)\.?[ \t]{0,32})?[0-9]{6}`)
 	// Pre-2011 licences carry a two-letter Cyrillic series.
 	reDocDriverLicenseOld = regexp.MustCompile(`[а-яё]{2} ?(?:№ ?)?[0-9]{6}`)
 	// The other pre-2011 layout puts the region code first: "77 АА 123456".
@@ -167,7 +167,7 @@ var (
 	// and for the same reason: a form writes "загранпаспорт серия 75 номер
 	// 1234567" as often as it writes the bare groups.
 	reDocForeignPassport = regexp.MustCompile(
-		`[0-9]{2} ?(?:(?:номера|номером|номер|№|#|no|n)\.? ?)?[0-9]{7}`)
+		`[0-9]{2}[ \t]{0,32}(?:(?:номера|номером|номер|№|#|no|n)\.?[ \t]{0,32})?[0-9]{7}`)
 	// Roman series, Cyrillic sub-series, 6 digits: "II-МЮ 123456".
 	reDocBirthCertificate = regexp.MustCompile(`[ivxlc]{1,5}-[а-яё]{2} ?(?:№ ?)?[0-9]{6}`)
 	// Two Cyrillic letters and 7 digits: "АБ 1234567".
