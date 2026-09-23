@@ -278,7 +278,7 @@ func fioTryMatch(ctx *Context, cls []fioClass, i int, caseBlind bool) (fioMatch,
 	}
 
 	c1, ok := fioReadComponent(ctx, cls, i)
-	if !ok || c1.cls&fioClsStop != 0 {
+	if !ok || (c1.cls&fioClsStop != 0 && !fioStopSurnameComp(ctx, c1)) {
 		return fioMatch{}, false
 	}
 
@@ -315,14 +315,14 @@ func fioReadComponents(ctx *Context, cls []fioClass, c1 fioComp) (c2, c3 fioComp
 	if j, sp := fioNextWordTok(ctx, c1.lastTok); sp {
 		c2, c2ok = fioReadComponent(ctx, cls, j)
 	}
-	if c2ok && c2.cls&fioClsStop != 0 {
+	if c2ok && c2.cls&fioClsStop != 0 && !fioStopSurnameComp(ctx, c2) {
 		c2ok = false
 	}
 	if c2ok {
 		if j, sp := fioNextWordTok(ctx, c2.lastTok); sp {
 			c3, c3ok = fioReadComponent(ctx, cls, j)
 		}
-		if c3ok && c3.cls&fioClsStop != 0 {
+		if c3ok && c3.cls&fioClsStop != 0 && !fioStopSurnameComp(ctx, c3) {
 			c3ok = false
 		}
 	}
@@ -431,6 +431,21 @@ func fioSurnameClassOK(ctx *Context, c fioComp) bool {
 	return c.cls&fioClsSurname != 0 && fioSurnameCompOK(ctx, c)
 }
 
+// fioPairSurname reports whether c, standing next to a dictionary given name,
+// is a surname the dictionary does not know: an oblique form, an adjective or
+// «-арь» surname, a surname on a consonant, or a short one such as «Ли», «Цой».
+func fioPairSurname(ctx *Context, c fioComp) bool {
+	return fioObliqueAnyCase(ctx, c) || fioShapeSurnameExtComp(ctx, c) ||
+		fioShapeSurnameConsonant(ctx, c) || fioShortSurnameComp(ctx, c)
+}
+
+// fioShortAnchoredSurname reports whether a dictionary surname shorter than
+// four runes («Цой», «Ким») may stand alone: only right after a strong client
+// anchor («г-жи Цой», «клиенту Ким») and only when written as a surname.
+func fioShortAnchoredSurname(ctx *Context, i int, c fioComp) bool {
+	return fioShortSurnameComp(ctx, c) && fioStrongClientAnchorLeft(ctx, i, c.start)
+}
+
 // fioTryBranchC tries branch C for c1. A word that only its capital letter
 // vouches for as a surname («Ткача Л. А.») is accepted only in front of two
 // initials.
@@ -449,9 +464,13 @@ func fioTrySurnameInitials(ctx *Context, cls []fioClass, c1 fioComp, strict bool
 		return fioMatch{}, false
 	}
 	// If the word right after the initials is itself a valid surname, the
-	// initials belong to it (branch A), not to the word before them.
+	// initials belong to it (branch A), not to the word before them — unless
+	// the word before is a confirmed surname and the one after is not a
+	// dictionary surname: in «РАССКАЖИ О ЛИХАЧЁВЕ Т. С. КОРОТКО» the ending of
+	// «КОРОТКО» must not take the initials away from «ЛИХАЧЁВЕ».
 	if j, ok := fioInitialsAfterTok(ctx, last); ok {
-		if c, ok := fioReadComponent(ctx, cls, j); ok && fioSurnameAfterInitials(ctx, c) {
+		if c, ok := fioReadComponent(ctx, cls, j); ok && fioSurnameAfterInitials(ctx, c) &&
+			(!strict || fioNameForms(c.lower)&dict.NameSurname != 0) {
 			return fioMatch{}, false
 		}
 	}
@@ -483,11 +502,11 @@ func fioTryTwoComponents(ctx *Context, cls []fioClass, i int, c1, c2 fioComp, ca
 	}
 	// «Фамилия Имя» и «Имя Фамилия» без отчества, где фамилия — косвенная
 	// форма, которой нет в словаре. Имя обязательно словарное (fioClsFirst).
-	if c1.cls&fioClsFirst != 0 && (fioObliqueAnyCase(ctx, c2) || fioShapeSurnameExtComp(ctx, c2) || fioShapeSurnameConsonant(ctx, c2)) {
+	if c1.cls&fioClsFirst != 0 && fioPairSurname(ctx, c2) {
 		return fioMatch{start: c1.start, end: c2.end, lastTok: c2.lastTok,
 			conf: fioConfPair, hint: "surname_name", surname: c2.lower}, true
 	}
-	if (fioObliqueAnyCase(ctx, c1) || fioShapeSurnameExtComp(ctx, c1) || fioShapeSurnameConsonant(ctx, c1)) && c2.cls&fioClsFirst != 0 {
+	if fioPairSurname(ctx, c1) && c2.cls&fioClsFirst != 0 {
 		return fioMatch{start: c1.start, end: c2.end, lastTok: c2.lastTok,
 			conf: fioConfPair, hint: "surname_name", surname: c1.lower}, true
 	}
@@ -499,11 +518,10 @@ func fioTryLoneSurname(ctx *Context, i int, c1 fioComp, caseBlind bool) (fioMatc
 	if c1.cls&fioClsAnySurname == 0 {
 		// Косвенная фамилия, которой нет в словаре: принимается только рядом
 		// с сильным клиентским якорем, который вводит субъекта данных.
-		if (!fioObliqueAnyCase(ctx, c1) && !fioShapeSurnameExtComp(ctx, c1) && !fioShapeSurnameConsonant(ctx, c1)) ||
-			!fioStrongClientAnchorLeft(ctx, i, c1.start) {
+		if !fioPairSurname(ctx, c1) || !fioStrongClientAnchorLeft(ctx, i, c1.start) {
 			return fioMatch{}, false
 		}
-	} else if fioRunes(c1.lower) < 4 ||
+	} else if (fioRunes(c1.lower) < 4 && !fioShortAnchoredSurname(ctx, i, c1)) ||
 		!fioLoneSurnameCaseOK(ctx, i, c1, caseBlind) ||
 		fioToponymVetoed(ctx, i, c1.lower) ||
 		!fioHasAnchor(ctx, i, c1.start) {
@@ -1507,6 +1525,18 @@ var fioStrongAnchor = fioSet([]string{
 	"абонент", "абонента", "абоненту", "абоненте",
 	"сотрудник", "сотрудника", "сотруднику", "сотрудником", "сотруднике",
 	"фио", "принадлежит",
+	// Женские формы ролей во всех падежах: «заявительницы Зубаревой», «клиентке Цой».
+	"заявительницы", "заявительнице", "заявительницу", "заявительницей",
+	"получательница", "получательницы", "получательнице", "получательницу", "получательницей",
+	"отправительница", "отправительницы", "отправительнице", "отправительницу", "отправительницей",
+	"владелица", "владелицы", "владелице", "владелицу", "владелицей",
+	"вкладчица", "вкладчицы", "вкладчице", "вкладчицу", "вкладчицей",
+	"поручительница", "поручительницы", "поручительнице", "поручительницу", "поручительницей",
+	"плательщица", "плательщицы", "плательщице", "плательщицу", "плательщицей",
+	"наследнице", "наследницу", "наследницей",
+	"пациентки", "пациентке", "пациентку", "пациенткой",
+	"абонентка", "абонентки", "абонентке", "абонентку", "абоненткой",
+	"сотрудница", "сотрудницы", "сотруднице", "сотрудницу", "сотрудницей",
 })
 
 // fioStrongPhraseAnchor: сильные якоря длиннее одного токена, сопоставляются
@@ -1560,6 +1590,18 @@ var fioAnchor = fioSet([]string{
 	"наследник", "наследника", "наследнику", "наследница", "наследницы", "наследнике",
 	"супруг", "супруга", "супруге", "супругу", "супруги",
 	"господин", "господина", "господину", "госпожа", "госпоже", "госпожи", "госпожу",
+	// Женские формы ролей во всех падежах: «заявительницы Зубаревой», «клиентке Цой».
+	"заявительницы", "заявительнице", "заявительницу", "заявительницей",
+	"получательница", "получательницы", "получательнице", "получательницу", "получательницей",
+	"отправительница", "отправительницы", "отправительнице", "отправительницу", "отправительницей",
+	"владелица", "владелицы", "владелице", "владелицу", "владелицей",
+	"вкладчица", "вкладчицы", "вкладчице", "вкладчицу", "вкладчицей",
+	"поручительница", "поручительницы", "поручительнице", "поручительницу", "поручительницей",
+	"плательщица", "плательщицы", "плательщице", "плательщицу", "плательщицей",
+	"наследнице", "наследницу", "наследницей",
+	"пациентки", "пациентке", "пациентку", "пациенткой",
+	"абонентка", "абонентки", "абонентке", "абонентку", "абоненткой",
+	"сотрудница", "сотрудницы", "сотруднице", "сотрудницу", "сотрудницей",
 })
 
 // fioPhraseAnchor: ищется как подстрока левого окна в fioHasAnchor (в отличие
@@ -1906,7 +1948,7 @@ func fioReadValueCompAtom(ctx *Context, cls []fioClass, run *fioValueRun, noCase
 		return false
 	}
 	accepted, dictSeen := fioValueAtomOK(ctx, cls, c, noCase)
-	if !accepted {
+	if !accepted || fioValueLowerTail(ctx, c, *run, noCase) {
 		return false
 	}
 	run.atoms++
@@ -1928,6 +1970,18 @@ func fioReadValueCompAtom(ctx *Context, cls []fioClass, run *fioValueRun, noCase
 		return true
 	}
 	return false
+}
+
+// fioValueLowerTail reports whether c must not continue a value run that has
+// already started: in a cased text, a lower-case word after the first atom is
+// accepted only when the dictionary knows it as a name. Its ending alone
+// («готова» looks like a surname on «-ова») does not carry it into
+// «заявительнице Цой готова».
+func fioValueLowerTail(ctx *Context, c fioComp, run fioValueRun, noCase bool) bool {
+	if noCase || run.atoms == 0 || text.IsUpperFirst(ctx.Text[c.start:c.end]) {
+		return false
+	}
+	return fioNameForms(c.lower) == 0
 }
 
 // fioValueTerminated проверяет правую границу прогона для конвертов R1 и R2.

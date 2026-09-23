@@ -178,22 +178,79 @@ func fioPatrNeighbourSurname(ctx *Context, c fioComp, cs fioCase, fem int) bool 
 	if !fioCaseBlind(ctx) && !text.IsUpperFirst(ctx.Text[c.start:c.end]) {
 		return false
 	}
-	if fioRunes(c.lower) < 2 || !fioCyrillicWord(c.lower) {
-		return false
-	}
-	if dict.IsStopWord(c.lower) || c.cls&(fioClsFirst|fioClsPatr) != 0 {
-		return false
-	}
-	if dict.IsCity(c.lower) || dict.IsCityForm(c.lower) || dict.IsCountry(c.lower) || dict.IsCitizenship(c.lower) {
-		return false
-	}
-	if _, bad := fioPatrNeighbourBad[c.lower]; bad {
+	if fioRunes(c.lower) < 2 || !fioCyrillicWord(c.lower) || fioPatrNeighbourExcluded(ctx, c) {
 		return false
 	}
 	if fioPatrNeighbourVerbLike(ctx, c) {
 		return false
 	}
-	return fioAgreesWithCase(c.lower, cs, fem)
+	if fioAgreesWithCase(c.lower, cs, fem) {
+		return true
+	}
+	// Indeclinable surnames agree with any case: a woman's surname on a
+	// consonant or «й», and the short Korean/Chinese ones («Ли Руслана»).
+	return (fem == 1 && fioFemIndeclinableComp(ctx, c)) || fioShortSurnameComp(ctx, c)
+}
+
+// fioPatrNeighbourExcluded reports whether c is a word that can never be the
+// surname next to a patronymic: a stop word (except a short surname written as
+// one, «Ли»), a given name or patronymic, a place, a citizenship, or one of the
+// forms of address in fioPatrNeighbourBad.
+func fioPatrNeighbourExcluded(ctx *Context, c fioComp) bool {
+	if (dict.IsStopWord(c.lower) && !fioStopSurnameComp(ctx, c)) || c.cls&(fioClsFirst|fioClsPatr) != 0 {
+		return true
+	}
+	if dict.IsCity(c.lower) || dict.IsCityForm(c.lower) || dict.IsCountry(c.lower) || dict.IsCitizenship(c.lower) {
+		return true
+	}
+	_, bad := fioPatrNeighbourBad[c.lower]
+	return bad
+}
+
+// fioFemIndeclinableComp reports whether c can be an indeclinable woman's
+// surname on a consonant or «й» next to an oblique patronymic. Only the capital
+// letter vouches for it, so it must be capitalised in a cased text, not the
+// first word of a sentence and not a preposition: otherwise «от анны петровны»,
+// «ПОДПИСАН АННОЙ ПЕТРОВНОЙ» or «Порекомендуй Ксении Андреевне» would pass.
+func fioFemIndeclinableComp(ctx *Context, c fioComp) bool {
+	last := []rune(c.lower)[len([]rune(c.lower))-1]
+	if last != 'й' && !fioIsConsonantRune(last) {
+		return false
+	}
+	if fioNoCaseSignal(ctx) || !text.IsUpperFirst(ctx.Text[c.start:c.end]) || fioSentenceStartPunct(ctx, c.tok) ||
+		fioAbbrevComp(ctx, c) {
+		return false
+	}
+	_, prep := fioInitialsPreposition[c.lower]
+	return !prep
+}
+
+// fioAbbrevComp reports whether c is written entirely in capitals inside a text
+// that carries case: an abbreviation such as «СМС», «МВД» or «ЦБ», which only
+// the capital letter would otherwise make look like a surname.
+func fioAbbrevComp(ctx *Context, c fioComp) bool {
+	raw := ctx.Text[c.start:c.end]
+	return fioRunes(c.lower) >= 2 && !fioNoCaseSignal(ctx) && strings.ToUpper(raw) == raw
+}
+
+// fioSentenceStartPunct reports whether token tok opens a sentence: it is the
+// first token or follows «.», «!» or «?». Unlike fioValueAtSentenceStart a line
+// break alone does not count, so a surname carried to the next line keeps
+// its capital letter as evidence («Олегу Борисовичу» + line break + «Ли»).
+func fioSentenceStartPunct(ctx *Context, tok int) bool {
+	j := tok - 1
+	for j >= 0 && ctx.Tokens[j].Kind == text.KindSpace {
+		j--
+	}
+	if j < 0 {
+		return true
+	}
+	prev := ctx.Tokens[j]
+	if prev.Kind != text.KindPunct {
+		return false
+	}
+	p := ctx.Text[prev.Start:prev.End]
+	return p == "." || p == "!" || p == "?"
 }
 
 // fioPatrNeighbourVerbLike reports whether c, not a dictionary surname, looks
@@ -201,13 +258,28 @@ func fioPatrNeighbourSurname(ctx *Context, c fioComp, cs fioCase, fem int) bool 
 // Both the oblique-verb endings and the bare imperative «ь» (excluding surnames
 // on «-арь»/«-ярь») are rejected.
 func fioPatrNeighbourVerbLike(ctx *Context, c fioComp) bool {
-	if c.cls&fioClsSurname != 0 || fioObliqueAnyCase(ctx, c) {
+	if c.cls&fioClsSurname != 0 || fioObliqueAnyCase(ctx, c) || fioShapeSurnameExt(c.lower) || fioRunes(c.lower) < 4 {
+		// Short words are never verbs here: «Ли» ends in the past-tense «-ли»
+		// but is a surname.
 		return false
 	}
 	if fioVerbLike(c.lower) {
 		return true
 	}
-	return fioRunes(c.lower) >= 4 && fioNameForms(c.lower) == 0 && fioImperativeLikeNotAry(c.lower)
+	if fioValueAtSentenceStart(ctx, c.tok) && fioFirstPluralVerb(c.lower) {
+		return true
+	}
+	return fioNameForms(c.lower) == 0 && fioImperativeLikeNotAry(c.lower)
+}
+
+// fioFirstPluralVerb reports whether w ends like a first-person plural verb:
+// «Благодарим», «Просим», «Сообщаем», «Поздравляем». «-им» counts only after a
+// stem that an adjective surname could not have («Залуцким» keeps «-ким»).
+func fioFirstPluralVerb(w string) bool {
+	if fioEndsAny(w, "ем", "ём") {
+		return true
+	}
+	return strings.HasSuffix(w, "им") && !fioVelarOrSibilantEnd(w[:len(w)-len("им")])
 }
 
 // fioAgreesWithCase reports whether the word w, taken as a surname, agrees in
@@ -224,11 +296,12 @@ func fioAgreesWithCase(w string, cs fioCase, fem int) bool {
 			return true
 		}
 	}
-	last := []rune(w)[len([]rune(w))-1]
-	if last == 'ь' || last < 'а' || last > 'я' {
-		if fem == 1 {
-			return true
-		}
+	// A woman's surname on «ь» does not decline («Анне Петровне Бондарь»). The
+	// same holds for a consonant or «й» («Мельник Ксении», «Андреевну Цой»), but
+	// those endings are shared with prepositions and verbs, so they are judged
+	// in context by fioFemIndeclinableComp.
+	if fem == 1 && strings.HasSuffix(w, "ь") {
+		return true
 	}
 	if fem == 0 {
 		switch {
@@ -380,7 +453,7 @@ func fioLooseBeforeInitials(ctx *Context, c fioComp) bool {
 	if !fioInitialsSurname(ctx, c) || fioValueAtSentenceStart(ctx, c.tok) {
 		return false
 	}
-	if fioVerbLike(c.lower) || fioImperativeLike(c.lower) {
+	if fioRunes(c.lower) >= 4 && (fioVerbLike(c.lower) || fioImperativeLike(c.lower)) {
 		return false
 	}
 	_, prep := fioInitialsPreposition[c.lower]
@@ -479,7 +552,7 @@ func fioInitialsSurname(ctx *Context, c fioComp) bool {
 	if fioRunes(c.lower) < 2 || !fioCyrillicWord(c.lower) {
 		return false
 	}
-	if dict.IsStopWord(c.lower) || dict.IsCity(c.lower) || dict.IsCountry(c.lower) {
+	if (dict.IsStopWord(c.lower) && !fioStopSurnameComp(ctx, c)) || dict.IsCity(c.lower) || dict.IsCountry(c.lower) {
 		return false
 	}
 	return true
@@ -557,9 +630,68 @@ func fioShapeAdjSurname(w string) bool {
 		if _, common := fioCommonAdj[stem]; common {
 			return false
 		}
+		if suf == "им" && !fioVelarOrSibilantEnd(stem) {
+			// An adjective surname takes «-им» only after к/г/х/ж/ш/щ/ч
+			// («Залуцким», «Долгим»); elsewhere «-им» is the first person
+			// plural of a verb: «Благодарим», «Просим», «Звоним».
+			return false
+		}
 		return true
 	}
 	return false
+}
+
+// fioVelarOrSibilantEnd reports whether s ends in к, г, х, ж, ш, щ or ч — the
+// stems after which an adjective's instrumental ending is «-им», not «-ым».
+func fioVelarOrSibilantEnd(s string) bool {
+	return fioEndsAny(s, "к", "г", "х", "ж", "ш", "щ", "ч")
+}
+
+// fioStopSurnames — short surnames (mostly Korean and Chinese) that the stop
+// list also holds as ordinary words: «ли» is a particle, «ан»/«ким» collide
+// with abbreviations. A capitalised one in the middle of a cased sentence is a
+// surname («я Ли Руслан Тимурович»).
+var fioStopSurnames = fioSet([]string{
+	"ли", "ан", "ким", "пак", "хан", "тен", "нам", "юн", "сон", "чой", "ян", "ни", "ма",
+})
+
+// fioStopSurnameComp reports whether c is one of fioStopSurnames written as a
+// surname: capitalised, in a text that carries case, and not the first word of
+// a sentence (where every word is capitalised anyway).
+func fioStopSurnameComp(ctx *Context, c fioComp) bool {
+	if _, ok := fioStopSurnames[c.lower]; !ok {
+		return false
+	}
+	return !fioNoCaseSignal(ctx) && text.IsUpperFirst(ctx.Text[c.start:c.end]) &&
+		!fioSentenceStartPunct(ctx, c.tok)
+}
+
+// fioShortSurnameComp reports whether c is a short surname of two or three
+// runes («Ли», «Ким», «Цой», «Пак») written as a surname: a stop-list
+// collision from fioStopSurnames, or a capitalised Cyrillic word on a consonant
+// or «й» that is not a stop word, place, organisation or dictionary given name,
+// in a cased text and not at the start of a sentence. Used only next to strong
+// evidence: a dictionary given name, initials or a strong client anchor.
+func fioShortSurnameComp(ctx *Context, c fioComp) bool {
+	n := fioRunes(c.lower)
+	if n < 2 || n > 3 || !fioCyrillicWord(c.lower) {
+		return false
+	}
+	if raw := ctx.Text[c.start:c.end]; !fioNoCaseSignal(ctx) && strings.ToUpper(raw) == raw {
+		return false // an all-caps abbreviation in a cased text: «СМС», «МВД», «ЦБ»
+	}
+	if fioStopSurnameComp(ctx, c) {
+		return true
+	}
+	if fioNoCaseSignal(ctx) || !text.IsUpperFirst(ctx.Text[c.start:c.end]) || fioSentenceStartPunct(ctx, c.tok) {
+		return false
+	}
+	if dict.IsStopWord(c.lower) || dict.IsCity(c.lower) || dict.IsCountry(c.lower) || dict.IsOrgWord(c.lower) ||
+		fioNameForms(c.lower)&(dict.NameFirst|dict.NamePatronymic) != 0 {
+		return false
+	}
+	last := []rune(c.lower)[n-1]
+	return last == 'й' || fioIsConsonantRune(last)
 }
 
 // fioShapeArySurname reports whether w ends like a surname on «-арь»/«-ярь».
