@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"unicode"
 
 	"pdguard/internal/pd"
@@ -236,6 +237,21 @@ var typeLabels = map[pd.Type]string{
 	pd.TypeResidencePermit:   "[ВИД НА ЖИТЕЛЬСТВО]",
 	pd.TypeOMS:               "[ПОЛИС ОМС]",
 	pd.TypeBankAccount:       "[СЧЁТ]",
+}
+
+// customLabels is the atomic snapshot of labels for user-defined types. The
+// engine publishes it on load and on every configuration apply, so the label
+// strategy can render a custom type's own label without a lock on the hot path.
+var customLabels atomic.Pointer[map[pd.Type]string]
+
+// SetCustomLabels publishes the labels for user-defined types. The engine calls
+// it on load and on every configuration apply.
+func SetCustomLabels(labels map[pd.Type]string) {
+	cp := make(map[pd.Type]string, len(labels))
+	for k, v := range labels {
+		cp[k] = v
+	}
+	customLabels.Store(&cp)
 }
 
 type labelStrategy struct{}

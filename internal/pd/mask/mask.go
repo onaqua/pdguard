@@ -166,12 +166,65 @@ func Restore(masked string, reps []Replacement) string {
 	return sb.String()
 }
 
+// RestoreText replaces every occurrence of a mask token with its original in
+// an arbitrary text, longest masks first so a mask that is a prefix of another
+// cannot shadow it. When the same mask maps to different originals the mask is
+// ambiguous and is left untouched, because restoring it would be a guess.
+//
+// It is used to demask the LLM's answer, which is free-form text rather than
+// the exact masked payload Restore expects.
+func RestoreText(text string, reps []Replacement) string {
+	if len(reps) == 0 {
+		return text
+	}
+	orig := unambiguousMasks(reps)
+	masks := make([]string, 0, len(orig))
+	for m := range orig {
+		masks = append(masks, m)
+	}
+	sort.Slice(masks, func(i, j int) bool { return len(masks[i]) > len(masks[j]) })
+	out := text
+	for _, m := range masks {
+		out = strings.ReplaceAll(out, m, orig[m])
+	}
+	return out
+}
+
+// unambiguousMasks maps each mask token to its original, dropping any mask
+// that maps to more than one distinct original.
+func unambiguousMasks(reps []Replacement) map[string]string {
+	orig := make(map[string]string, len(reps))
+	ambiguous := make(map[string]bool, len(reps))
+	for _, r := range reps {
+		if r.Masked == "" {
+			continue
+		}
+		if o, ok := orig[r.Masked]; ok {
+			if o != r.Original {
+				ambiguous[r.Masked] = true
+			}
+		} else {
+			orig[r.Masked] = r.Original
+		}
+	}
+	for m := range ambiguous {
+		delete(orig, m)
+	}
+	return orig
+}
+
 // Label returns the bracketed Russian label for a type, e.g. "[ТЕЛЕФОН]".
 // Unknown types get the generic "[ПД]" so a new category can never surface a
-// raw value just because its label was forgotten.
+// raw value just because its label was forgotten. Labels for user-defined types
+// come from the atomic snapshot published by SetCustomLabels.
 func Label(t pd.Type) string {
 	if l, ok := typeLabels[t]; ok {
 		return l
+	}
+	if m := customLabels.Load(); m != nil {
+		if l, ok := (*m)[t]; ok && l != "" {
+			return l
+		}
 	}
 	return "[ПД]"
 }

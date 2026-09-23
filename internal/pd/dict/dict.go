@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"pdguard/internal/pd/text"
 )
@@ -105,6 +106,38 @@ var (
 	orgWords     set
 )
 
+// customSets is the operator-supplied dictionary additions. It is swapped
+// wholesale on every configuration apply, so the hot-path lookups read it
+// through an atomic pointer and never take a lock.
+type customSets struct {
+	famous     set
+	bankPlaces set
+}
+
+// custom is the atomic snapshot of the operator-supplied dictionary additions.
+var custom atomic.Pointer[customSets]
+
+// SetCustom publishes the operator-supplied dictionary additions. The engine
+// calls it on load and on every configuration apply. Entries are lower-cased so
+// the lookups can compare against already-lower-cased words.
+func SetCustom(famousPeople, bankPlaces []string) {
+	cs := &customSets{
+		famous:     make(set, len(famousPeople)),
+		bankPlaces: make(set, len(bankPlaces)),
+	}
+	for _, f := range famousPeople {
+		if f = strings.TrimSpace(f); f != "" {
+			cs.famous[text.SafeLower(f)] = struct{}{}
+		}
+	}
+	for _, b := range bankPlaces {
+		if b = strings.TrimSpace(b); b != "" {
+			cs.bankPlaces[text.SafeLower(b)] = struct{}{}
+		}
+	}
+	custom.Store(cs)
+}
+
 func load() {
 	once.Do(func() {
 		firstNames = readSet("data/first_names.txt")
@@ -193,8 +226,19 @@ func IsStopWord(w string) bool           { load(); _, ok := stopWords[w]; return
 func IsOrgWord(w string) bool            { load(); _, ok := orgWords[w]; return ok }
 
 // IsBankPlace reports whether a toponym belongs to the bank's own premises,
-// which must not be masked as a client address.
-func IsBankPlace(w string) bool { load(); _, ok := bankPlaces[w]; return ok }
+// which must not be masked as a client address. The operator-supplied additions
+// are checked alongside the built-in list.
+func IsBankPlace(w string) bool {
+	load()
+	if _, ok := bankPlaces[w]; ok {
+		return true
+	}
+	if cs := custom.Load(); cs != nil {
+		_, ok := cs.bankPlaces[w]
+		return ok
+	}
+	return false
+}
 
 // Month returns the 1-based month number for a Russian month name in any
 // common case form ("января", "январь", "янв").
@@ -225,16 +269,28 @@ var patronymicSuffixes = []string{
 
 // IsFamousPerson reports whether a full name (space-separated, lowercased)
 // names a public figure whose mention is not personal data — the Pushkin case
-// called out in the specification.
+// called out in the specification. The operator-supplied additions are checked
+// alongside the built-in list.
 func IsFamousPerson(fullLower string) bool {
 	load()
 	if _, ok := famous[fullLower]; ok {
 		return true
 	}
+	cs := custom.Load()
+	if cs != nil {
+		if _, ok := cs.famous[fullLower]; ok {
+			return true
+		}
+	}
 	// A single surname from the famous list also counts.
 	if !strings.ContainsRune(fullLower, ' ') {
-		_, ok := famousLast[fullLower]
-		return ok
+		if _, ok := famousLast[fullLower]; ok {
+			return true
+		}
+		if cs != nil {
+			_, ok := cs.famous[fullLower]
+			return ok
+		}
 	}
 	return false
 }

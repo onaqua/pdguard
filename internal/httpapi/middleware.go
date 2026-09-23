@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"pdguard/internal/config"
 	"pdguard/internal/logging"
 	"pdguard/internal/metrics"
 )
@@ -120,6 +121,9 @@ func (s *Server) limitMW(next http.Handler) http.Handler {
 func (s *Server) timeoutMW(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		d := s.cfg.Get().Server.ProcessTimeout
+		if r.URL.Path == pathChat {
+			d = chatTimeout(s.cfg.Get())
+		}
 		if d <= 0 {
 			next.ServeHTTP(w, r)
 			return
@@ -129,6 +133,20 @@ func (s *Server) timeoutMW(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
+
+// chatTimeout returns the deadline for the chat route: the LLM call plus a
+// fixed margin for masking and restoring, which can take longer than the
+// /process budget. Zero means no deadline.
+func chatTimeout(cfg *config.Config) time.Duration {
+	if cfg.LLM.TimeoutMS <= 0 {
+		return 0
+	}
+	return time.Duration(cfg.LLM.TimeoutMS)*time.Millisecond + chatTimeoutMargin
+}
+
+// chatTimeoutMargin is the extra time a chat request gets on top of the LLM
+// call for masking, the leak guard and restoring the answer.
+const chatTimeoutMargin = 10 * time.Second
 
 // http.TimeoutHandler is deliberately not used: it buffers the whole response
 // in memory before writing it, which for a 100k-token payload doubles the peak

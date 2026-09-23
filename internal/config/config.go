@@ -24,6 +24,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -168,6 +169,90 @@ type LogCfg struct {
 	Format string `json:"format"` // json | text
 	// SampleEvery logs only every Nth request event; 0 and 1 both mean "all".
 	SampleEvery int `json:"sample_every"`
+	// Requests enables the per-request "request" summary line. It is off for
+	// maximum-RPS runs where an info line per request would cost more than the
+	// masking; sampling (log.sample_every) still applies on top.
+	Requests bool `json:"requests"`
+}
+
+// LLMCfg configures the OpenAI-compatible upstream used by the LLM chat chain
+// (POST /v1/chat/completions). The API key is deliberately NOT here: it is read
+// only from the PDGUARD_LLM_API_KEY environment variable, so it never appears
+// in a configuration file, in /admin/config output or in a log record.
+type LLMCfg struct {
+	// BaseURL is the OpenAI-compatible endpoint root. Empty means the built-in
+	// demo model is used instead of the network, so the chain can be shown
+	// offline.
+	BaseURL string
+	// Model is the model identifier sent in the request body.
+	Model string
+	// TimeoutMS bounds one upstream call.
+	TimeoutMS int
+	// Stream requests the SSE streaming form, which AlfaGen requires.
+	Stream bool
+	// CAFile is a path to a PEM bundle of extra root certificates appended to
+	// the system pool. Empty uses the system pool alone.
+	CAFile string
+	// Strategy is the mask strategy applied to every PD type in the LLM chain.
+	// It must name a registered strategy.
+	Strategy string
+	// RequestsPerMinute caps the number of LLM calls the whole process may make
+	// per minute. Zero means no limit; a negative value is a validation error.
+	RequestsPerMinute int
+}
+
+// CustomType is a user-defined personal-data type, added through configuration
+// without touching the core. It lets an operator extend the set of identifiable
+// PD categories — a contract number, an internal client id — by describing a
+// regexp and an optional anchor word, instead of writing a detector.
+type CustomType struct {
+	// Name is the wire identifier of the type, e.g. "CONTRACT_NUMBER". It must
+	// match ^[A-Z][A-Z0-9_]{1,40}$ and must not collide with a built-in type.
+	Name string `json:"name"`
+	// Pattern is the Go regular expression matched against the payload.
+	Pattern string `json:"pattern"`
+	// Anchors are cue words (case-insensitive, matched at word boundaries) that
+	// must stand within Window bytes to the left of a match for it to be
+	// accepted. Empty means the pattern is accepted on its own.
+	Anchors []string `json:"anchors,omitempty"`
+	// Window is how far left of a match an anchor word is accepted, in bytes.
+	// Zero means the default of 40.
+	Window int `json:"window,omitempty"`
+	// Strategy is the mask strategy name applied to this type.
+	Strategy string `json:"strategy"`
+	// Label is the bracketed label used when Strategy is "label"; empty means
+	// the generic "[ПД]".
+	Label string `json:"label,omitempty"`
+	// MinConfidence is the confidence floor; zero means the package default.
+	MinConfidence float64 `json:"min_confidence,omitempty"`
+}
+
+// AnchorWindow returns the anchor window, defaulting to 40 when unset.
+func (ct CustomType) AnchorWindow() int {
+	if ct.Window <= 0 {
+		return 40
+	}
+	return ct.Window
+}
+
+// Confidence returns the confidence floor, defaulting to the package default.
+func (ct CustomType) Confidence() float64 {
+	if ct.MinConfidence <= 0 {
+		return DefaultMinConfidence
+	}
+	return ct.MinConfidence
+}
+
+// Dictionaries holds operator-supplied additions to the built-in dictionaries.
+// They extend the negative lists that keep the service from masking things that
+// are not personal data: public figures and the bank's own premises.
+type Dictionaries struct {
+	// FamousPeople are full names (space-separated, any case) of public figures
+	// whose mention is not personal data.
+	FamousPeople []string `json:"famous_people,omitempty"`
+	// BankPlaces are toponyms of the bank's own premises, which must not be
+	// masked as a client address.
+	BankPlaces []string `json:"bank_places,omitempty"`
 }
 
 // Config is an immutable snapshot of the whole configuration. Never mutate a
@@ -177,13 +262,25 @@ type Config struct {
 	Store         StoreCfg
 	Log           LogCfg
 	Masking       MaskingCfg
+	LLM           LLMCfg
 	DefaultSystem string
 	// RequireSystem rejects requests that name an unknown system.
 	RequireSystem bool
 	// Systems is keyed by the lower-cased system id, because identification
 	// must be case-insensitive.
 	Systems map[string]*System
+	// CustomTypes are the user-defined PD types, in configuration order.
+	CustomTypes []CustomType
+	// Dictionaries are the operator-supplied dictionary additions.
+	Dictionaries Dictionaries
 }
+
+// ErrNotPersisted is returned by Apply when the configuration was validated and
+// published in memory but could not be written to disk (for example, the
+// configuration directory is mounted read-only). Callers can distinguish this
+// from a validation failure with errors.Is and still report the change as
+// applied, warning that it will not survive a restart.
+var ErrNotPersisted = errors.New("config: not persisted")
 
 // Manager holds the live configuration and swaps it atomically. The zero value
 // is not usable; build one with Load.
@@ -219,6 +316,16 @@ type serverJSON struct {
 	AdminToken string `json:"admin_token,omitempty"`
 }
 
+type llmJSON struct {
+	BaseURL           string `json:"base_url"`
+	Model             string `json:"model"`
+	TimeoutMS         int    `json:"timeout_ms"`
+	Stream            bool   `json:"stream"`
+	CAFile            string `json:"ca_file"`
+	Strategy          string `json:"strategy"`
+	RequestsPerMinute int    `json:"requests_per_minute"`
+}
+
 type configJSON struct {
 	Server serverJSON `json:"server"`
 	Store  StoreCfg   `json:"store"`
@@ -226,10 +333,13 @@ type configJSON struct {
 	// Masking carries only booleans whose safe value is the zero value, so it
 	// needs none of the pointer treatment serverJSON.FailOpen gets: a file
 	// written before this block existed decodes to exactly the old behaviour.
-	Masking       MaskingCfg `json:"masking"`
-	DefaultSystem string     `json:"default_system"`
-	RequireSystem bool       `json:"require_system"`
-	Systems       []*System  `json:"systems"`
+	Masking       MaskingCfg   `json:"masking"`
+	LLM           llmJSON      `json:"llm"`
+	DefaultSystem string       `json:"default_system"`
+	RequireSystem bool         `json:"require_system"`
+	Systems       []*System    `json:"systems"`
+	CustomTypes   []CustomType `json:"custom_types,omitempty"`
+	Dictionaries  Dictionaries `json:"dictionaries,omitempty"`
 }
 
 // Rule returns the rule for t and whether the system configures it at all.
@@ -279,6 +389,8 @@ func (c *Config) Clone() *Config {
 	for k, v := range c.Systems {
 		cp.Systems[k] = v.Clone()
 	}
+	cp.CustomTypes = append([]CustomType(nil), c.CustomTypes...)
+	cp.Dictionaries = c.Dictionaries
 	return &cp
 }
 
@@ -304,8 +416,17 @@ func Default() *Config {
 			MaxValueBytes: defaultStoreMaxValueBytes, // 8388608
 			MaxBytes:      defaultStoreMaxBytes,      // 1073741824
 		},
-		Log:     LogCfg{Level: "info", Format: "json", SampleEvery: 0},
+		Log:     LogCfg{Level: "info", Format: "json", SampleEvery: 0, Requests: true},
 		Masking: MaskingCfg{}, // SpanIncludeLabels == false
+		LLM: LLMCfg{
+			BaseURL:           "",
+			Model:             "deepseek-ai/DeepSeek-V4-Flash-0731",
+			TimeoutMS:         60000,
+			Stream:            true,
+			CAFile:            "",
+			Strategy:          "token",
+			RequestsPerMinute: 60,
+		},
 
 		DefaultSystem: "default",
 		RequireSystem: false,
@@ -367,11 +488,22 @@ func toWire(c *Config) *configJSON {
 			FailOpen:         &failOpen,
 			AdminToken:       c.Server.AdminToken,
 		},
-		Store:         c.Store,
-		Log:           c.Log,
-		Masking:       c.Masking,
+		Store:   c.Store,
+		Log:     c.Log,
+		Masking: c.Masking,
+		LLM: llmJSON{
+			BaseURL:           c.LLM.BaseURL,
+			Model:             c.LLM.Model,
+			TimeoutMS:         c.LLM.TimeoutMS,
+			Stream:            c.LLM.Stream,
+			CAFile:            c.LLM.CAFile,
+			Strategy:          c.LLM.Strategy,
+			RequestsPerMinute: c.LLM.RequestsPerMinute,
+		},
 		DefaultSystem: c.DefaultSystem,
 		RequireSystem: c.RequireSystem,
+		CustomTypes:   append([]CustomType(nil), c.CustomTypes...),
+		Dictionaries:  c.Dictionaries,
 		Systems:       make([]*System, 0, len(c.Systems)),
 	}
 	for _, s := range c.Systems {
@@ -401,11 +533,22 @@ func fromWire(w *configJSON) *Config {
 			FailOpen:       failOpen,
 			AdminToken:     w.Server.AdminToken,
 		},
-		Store:         w.Store,
-		Log:           w.Log,
-		Masking:       w.Masking,
+		Store:   w.Store,
+		Log:     w.Log,
+		Masking: w.Masking,
+		LLM: LLMCfg{
+			BaseURL:           w.LLM.BaseURL,
+			Model:             w.LLM.Model,
+			TimeoutMS:         w.LLM.TimeoutMS,
+			Stream:            w.LLM.Stream,
+			CAFile:            w.LLM.CAFile,
+			Strategy:          w.LLM.Strategy,
+			RequestsPerMinute: w.LLM.RequestsPerMinute,
+		},
 		DefaultSystem: w.DefaultSystem,
 		RequireSystem: w.RequireSystem,
+		CustomTypes:   append([]CustomType(nil), w.CustomTypes...),
+		Dictionaries:  w.Dictionaries,
 		Systems:       make(map[string]*System, len(w.Systems)),
 	}
 	for _, s := range w.Systems {
@@ -517,7 +660,10 @@ func (m *Manager) Apply(c *Config) error {
 	if m.path == "" {
 		return nil
 	}
-	return m.persist(next)
+	if err := m.persist(next); err != nil {
+		return fmt.Errorf("%w: %v", ErrNotPersisted, err)
+	}
+	return nil
 }
 
 // persist writes the file atomically via a temporary file plus rename, so a
@@ -586,6 +732,10 @@ var knownTypes = func() map[string]bool {
 	return m
 }()
 
+// customNameRe is the allowed shape of a user-defined type name: an upper-case
+// letter followed by up to 40 upper-case letters, digits or underscores.
+var customNameRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,40}$`)
+
 // Validate reports why c cannot be served. It is exported so an admin endpoint
 // can check a candidate configuration before applying it.
 func (m *Manager) Validate(c *Config) error {
@@ -599,6 +749,9 @@ func (m *Manager) Validate(c *Config) error {
 		return err
 	}
 	if err := validateLog(c); err != nil {
+		return err
+	}
+	if err := validateLLM(c); err != nil {
 		return err
 	}
 	if c.DefaultSystem == "" {
@@ -615,7 +768,11 @@ func (m *Manager) Validate(c *Config) error {
 	// empty, and rejecting every strategy name then would make the package
 	// untestable in isolation. So the name check is skipped when nothing has
 	// registered yet, and enforced as soon as anything has.
-	return validateSystems(c, len(mask.StrategyNames()) > 0)
+	checkStrategies := len(mask.StrategyNames()) > 0
+	if err := validateCustomTypes(c, checkStrategies); err != nil {
+		return err
+	}
+	return validateSystems(c, checkStrategies)
 }
 
 // validateServer checks the HTTP-layer knobs.
@@ -686,6 +843,28 @@ func validateLog(c *Config) error {
 	return nil
 }
 
+// validateLLM checks the LLM chain settings. The strategy name is checked only
+// when the mask registry is populated, for the same reason validateTypeRule
+// does: the config package must stay testable in isolation.
+func validateLLM(c *Config) error {
+	if c.LLM.TimeoutMS <= 0 {
+		return errors.New("config: llm.timeout_ms must be positive")
+	}
+	if strings.TrimSpace(c.LLM.Model) == "" {
+		return errors.New("config: llm.model is empty")
+	}
+	if strings.TrimSpace(c.LLM.Strategy) == "" {
+		return errors.New("config: llm.strategy is empty")
+	}
+	if c.LLM.RequestsPerMinute < 0 {
+		return errors.New("config: llm.requests_per_minute must not be negative")
+	}
+	if len(mask.StrategyNames()) > 0 && mask.Lookup(c.LLM.Strategy) == nil {
+		return fmt.Errorf("config: llm.strategy %q is unknown", c.LLM.Strategy)
+	}
+	return nil
+}
+
 // validateSystems checks every configured system and its per-type rules.
 func validateSystems(c *Config, checkStrategies bool) error {
 	for id, s := range c.Systems {
@@ -700,6 +879,44 @@ func validateSystems(c *Config, checkStrategies bool) error {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+// validateCustomTypes checks every user-defined PD type.
+func validateCustomTypes(c *Config, checkStrategies bool) error {
+	seen := make(map[string]bool, len(c.CustomTypes))
+	for _, ct := range c.CustomTypes {
+		if err := validateCustomType(ct, seen, checkStrategies); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateCustomType checks one user-defined PD type.
+func validateCustomType(ct CustomType, seen map[string]bool, checkStrategies bool) error {
+	if !customNameRe.MatchString(ct.Name) {
+		return fmt.Errorf("config: custom type name %q must match ^[A-Z][A-Z0-9_]{1,40}$", ct.Name)
+	}
+	if knownTypes[ct.Name] {
+		return fmt.Errorf("config: custom type name %q collides with a built-in type", ct.Name)
+	}
+	if seen[ct.Name] {
+		return fmt.Errorf("config: duplicate custom type name %q", ct.Name)
+	}
+	seen[ct.Name] = true
+	if _, err := regexp.Compile(ct.Pattern); err != nil {
+		return fmt.Errorf("config: custom type %q: invalid pattern: %v", ct.Name, err)
+	}
+	if ct.Window < 0 || ct.Window > 200 {
+		return fmt.Errorf("config: custom type %q: window %d is outside [0,200]", ct.Name, ct.Window)
+	}
+	if ct.MinConfidence < 0 || ct.MinConfidence > 1 {
+		return fmt.Errorf("config: custom type %q: min_confidence %v is outside [0,1]", ct.Name, ct.MinConfidence)
+	}
+	if checkStrategies && mask.Lookup(ct.Strategy) == nil {
+		return fmt.Errorf("config: custom type %q: unknown mask strategy %q", ct.Name, ct.Strategy)
 	}
 	return nil
 }

@@ -23,8 +23,10 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -34,6 +36,7 @@ import (
 	"pdguard/internal/metrics"
 	"pdguard/internal/pd"
 	"pdguard/internal/pd/detect"
+	"pdguard/internal/pd/dict"
 	"pdguard/internal/pd/mask"
 	"pdguard/internal/store"
 )
@@ -67,6 +70,12 @@ type Engine struct {
 	cfg   *config.Manager
 	store store.Store
 
+	// applied is the last configuration whose custom types and dictionaries
+	// were published to the detect/dict/mask snapshots. It is compared against
+	// the live config on the hot path so a Manager.Apply takes effect without
+	// a restart and without a lock.
+	applied atomic.Pointer[config.Config]
+
 	// fallback is the strategy used when a rule names one that is not
 	// registered. Resolved once: mask.Lookup takes a read lock, and this is the
 	// error path of the hot path.
@@ -85,11 +94,66 @@ func New(o Options) *Engine {
 	if o.Store == nil {
 		panic("engine: Options.Store is nil")
 	}
-	return &Engine{
+	e := &Engine{
 		cfg:      o.Cfg,
 		store:    o.Store,
 		fallback: mask.Lookup(mask.NameStarsKeep2),
 	}
+	e.applyCustom(o.Cfg.Get())
+	return e
+}
+
+// applyCustom publishes the custom types and dictionary additions of cfg to the
+// detect, dict and mask snapshots. It is called on construction and lazily on
+// the hot path whenever the live configuration pointer changes.
+func (e *Engine) applyCustom(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	types := make([]detect.CustomType, 0, len(cfg.CustomTypes))
+	labels := make(map[pd.Type]string, len(cfg.CustomTypes))
+	for _, ct := range cfg.CustomTypes {
+		anchors := make([]string, len(ct.Anchors))
+		for i, a := range ct.Anchors {
+			anchors[i] = strings.ToLower(a)
+		}
+		types = append(types, detect.CustomType{
+			Name:          ct.Name,
+			Pattern:       regexp.MustCompile(ct.Pattern),
+			Anchors:       anchors,
+			AnchorWindow:  ct.AnchorWindow(),
+			Strategy:      ct.Strategy,
+			Label:         ct.Label,
+			MinConfidence: ct.Confidence(),
+		})
+		if ct.Label != "" {
+			labels[pd.Type(ct.Name)] = ct.Label
+		}
+	}
+	detect.SetCustomTypes(types)
+	mask.SetCustomLabels(labels)
+	dict.SetCustom(cfg.Dictionaries.FamousPeople, cfg.Dictionaries.BankPlaces)
+	e.applied.Store(cfg)
+}
+
+// syncCustom re-applies the custom types and dictionaries when the live
+// configuration has changed since the last apply. It is the lock-free way the
+// engine learns about a Manager.Apply.
+func (e *Engine) syncCustom() {
+	cur := e.cfg.Get()
+	if cur == e.applied.Load() {
+		return
+	}
+	e.applyCustom(cur)
+}
+
+// SyncCustom re-applies the custom types and dictionaries when the live
+// configuration has changed since the last apply. It is the exported form of
+// syncCustom, for callers that run detection outside Process/Mask (for example
+// the /admin/detect debug endpoint) and still need the custom types and
+// dictionaries to be current.
+func (e *Engine) SyncCustom() {
+	e.syncCustom()
 }
 
 // Result describes one finished operation.
@@ -107,6 +171,7 @@ type Result struct {
 // and either masks it or returns the original that was masked earlier.
 func (e *Engine) Process(ctx context.Context, systemID, payloadID, payload string) (Result, error) {
 	start := time.Now()
+	e.syncCustom()
 	sys, err := e.system(systemID)
 	if err != nil {
 		return Result{}, err
@@ -162,6 +227,7 @@ func (e *Engine) Process(ctx context.Context, systemID, payloadID, payload strin
 // Mask forces the forward step: mask the payload and remember the mapping.
 func (e *Engine) Mask(ctx context.Context, systemID, payloadID, payload string) (Result, error) {
 	start := time.Now()
+	e.syncCustom()
 	sys, err := e.system(systemID)
 	if err != nil {
 		return Result{}, err
@@ -266,23 +332,31 @@ func (e *Engine) maskInto(ctx context.Context, sys *config.System, payloadID, ke
 		return e.finish(ctx, Result{Output: "", Op: OpMask}, sys, payloadID, payload, start), nil
 	}
 
+	stageStart := time.Now()
 	spans, err := e.detect(ctx, sys, payload)
 	if err != nil {
 		e.observe(OpMask, 408, start, payload, "")
 		return Result{}, err
 	}
-	spans = e.filter(sys, spans)
+	e.stage(ctx, "detect", time.Since(stageStart))
+
+	stageStart = time.Now()
+	cfg := e.cfg.Get()
+	spans = e.filter(sys, cfg, spans)
+	e.stage(ctx, "filter", time.Since(stageStart))
 
 	// Span-boundary hedge, after overlap resolution and filtering and before
 	// masking. Switched off by default, and switched off it costs one atomic
 	// pointer load (already the cheapest operation in this function) plus one
 	// boolean test: no allocation, no preparation, no call. See
 	// expandLabelSpans for what the enabled path does and why it exists.
-	if e.cfg.Get().Masking.SpanIncludeLabels {
+	if cfg.Masking.SpanIncludeLabels {
 		spans = expandLabelSpans(payload, spans)
 	}
 
-	out := mask.Apply(payload, spans, e.picker(sys))
+	stageStart = time.Now()
+	out := mask.Apply(payload, spans, e.picker(sys, cfg))
+	e.stage(ctx, "mask", time.Since(stageStart))
 
 	// Nothing was replaced: the mask *is* the original. No counters to build, no
 	// mapping worth remembering — a later reverse call finds no entry, echoes
@@ -296,7 +370,11 @@ func (e *Engine) maskInto(ctx context.Context, sys *config.System, payloadID, ke
 	for _, r := range out.Replacements {
 		name := string(r.Type)
 		counts[name]++
-		metrics.ObservePDType(name)
+		if isCustomType(cfg, r.Type) {
+			metrics.ObservePDType(metrics.LabelCustom)
+		} else {
+			metrics.ObservePDType(name)
+		}
 	}
 	types := make([]string, 0, len(out.Types))
 	for _, t := range out.Types {
@@ -304,12 +382,14 @@ func (e *Engine) maskInto(ctx context.Context, sys *config.System, payloadID, ke
 	}
 
 	if sys.Demask {
+		stageStart = time.Now()
 		e.store.Put(key, store.Entry{
 			Original: payload,
 			Masked:   out.Masked,
 			Types:    types,
 			System:   sys.ID,
 		})
+		e.stage(ctx, "store", time.Since(stageStart))
 	} else if logging.ShouldSample() {
 		logging.L().LogAttrs(ctx, slog.LevelDebug, "demasking disabled for system, mapping not stored",
 			slog.String("system", sys.ID), slog.String("payload_id", payloadID))
@@ -349,7 +429,7 @@ func (e *Engine) system(systemID string) (*config.System, error) {
 // once more, which is what collapses an entity seen by two neighbours into the
 // single span that reaches the mask.
 func (e *Engine) detect(ctx context.Context, sys *config.System, payload string) ([]pd.Span, error) {
-	enabled := enabledFunc(sys)
+	enabled := enabledFunc(sys, e.cfg.Get())
 
 	started := time.Now()
 	defer func() { metrics.ObserveDetect(time.Since(started)) }()
@@ -414,12 +494,43 @@ func chunkStart(s string, cut int) int {
 }
 
 // enabledFunc builds the predicate detect.NewContext uses to skip work for
-// types this system does not want masked.
-func enabledFunc(sys *config.System) func(pd.Type) bool {
+// types this system does not want masked. A user-defined type is enabled when
+// the system has no rule for it (its own strategy and confidence apply) or when
+// the rule exists and is enabled.
+func enabledFunc(sys *config.System, cfg *config.Config) func(pd.Type) bool {
+	custom := customTypeNames(cfg)
 	return func(t pd.Type) bool {
 		r, ok := sys.Rule(t)
-		return ok && r.Enabled
+		if ok {
+			return r.Enabled
+		}
+		return custom[t]
 	}
+}
+
+// customTypeNames returns the set of user-defined type names in cfg.
+func customTypeNames(cfg *config.Config) map[pd.Type]bool {
+	if cfg == nil || len(cfg.CustomTypes) == 0 {
+		return nil
+	}
+	m := make(map[pd.Type]bool, len(cfg.CustomTypes))
+	for _, ct := range cfg.CustomTypes {
+		m[pd.Type(ct.Name)] = true
+	}
+	return m
+}
+
+// isCustomType reports whether t is a user-defined type in cfg.
+func isCustomType(cfg *config.Config, t pd.Type) bool {
+	if cfg == nil {
+		return false
+	}
+	for _, ct := range cfg.CustomTypes {
+		if ct.Name == string(t) {
+			return true
+		}
+	}
+	return false
 }
 
 // filter applies the configured rules to raw detections, in two passes.
@@ -430,18 +541,14 @@ func enabledFunc(sys *config.System) func(pd.Type) bool {
 // number is" — against the set of types that survived the first pass. The order
 // matters: a companion that was itself discarded for lack of confidence must
 // not vouch for anything.
-func (e *Engine) filter(sys *config.System, spans []pd.Span) []pd.Span {
+func (e *Engine) filter(sys *config.System, cfg *config.Config, spans []pd.Span) []pd.Span {
 	if len(spans) == 0 {
 		return spans
 	}
 	kept := spans[:0:0] // fresh backing array: the caller's slice stays intact
 	present := make(map[pd.Type]bool, 8)
 	for _, s := range spans {
-		r, ok := sys.Rule(s.Type)
-		if !ok || !r.Enabled {
-			continue
-		}
-		if s.Conf < minConfidence(r) {
+		if !keepSpan(sys, cfg, s) {
 			continue
 		}
 		kept = append(kept, s)
@@ -460,6 +567,31 @@ func (e *Engine) filter(sys *config.System, spans []pd.Span) []pd.Span {
 		out = append(out, s)
 	}
 	return out
+}
+
+// keepSpan reports whether one detection survives the first filter pass: the
+// system must enable its type and the confidence must clear the floor. A
+// user-defined type with no system rule is enabled by default and uses its own
+// confidence floor.
+func keepSpan(sys *config.System, cfg *config.Config, s pd.Span) bool {
+	r, ok := sys.Rule(s.Type)
+	if !ok {
+		return isCustomType(cfg, s.Type) && s.Conf >= customConfidence(cfg, s.Type)
+	}
+	return r.Enabled && s.Conf >= minConfidence(r)
+}
+
+// customConfidence returns the confidence floor of a user-defined type, or the
+// package default when the type is not configured.
+func customConfidence(cfg *config.Config, t pd.Type) float64 {
+	if cfg != nil {
+		for _, ct := range cfg.CustomTypes {
+			if ct.Name == string(t) {
+				return ct.Confidence()
+			}
+		}
+	}
+	return config.DefaultMinConfidence
 }
 
 // minConfidence returns the floor for a rule. A rule that leaves the field at
@@ -582,11 +714,20 @@ func isLabelWordByte(b byte) bool {
 	return b >= 0x80 || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
-// picker returns the strategy selector mask.Apply calls per span.
-func (e *Engine) picker(sys *config.System) func(pd.Type) mask.Strategy {
+// picker returns the strategy selector mask.Apply calls per span. A user-defined
+// type with no system rule uses its own strategy; the label strategy renders the
+// type's own label.
+func (e *Engine) picker(sys *config.System, cfg *config.Config) func(pd.Type) mask.Strategy {
 	return func(t pd.Type) mask.Strategy {
 		r, ok := sys.Rule(t)
 		if !ok {
+			if ct, found := customType(cfg, t); found {
+				if s := mask.Lookup(ct.Strategy); s != nil {
+					return s
+				}
+				e.warnStrategy(sys.ID, string(t), ct.Strategy)
+				return e.fallback
+			}
 			return e.fallback
 		}
 		if s := mask.Lookup(r.Strategy); s != nil {
@@ -595,6 +736,18 @@ func (e *Engine) picker(sys *config.System) func(pd.Type) mask.Strategy {
 		e.warnStrategy(sys.ID, string(t), r.Strategy)
 		return e.fallback
 	}
+}
+
+// customType returns the user-defined type matching t, if any.
+func customType(cfg *config.Config, t pd.Type) (config.CustomType, bool) {
+	if cfg != nil {
+		for _, ct := range cfg.CustomTypes {
+			if ct.Name == string(t) {
+				return ct, true
+			}
+		}
+	}
+	return config.CustomType{}, false
 }
 
 // warnStrategy reports an unknown strategy name once per name. Configuration is
@@ -617,20 +770,22 @@ func (e *Engine) finish(ctx context.Context, res Result, sys *config.System, pay
 	res.Duration = time.Since(start)
 	e.observe(res.Op, 200, start, in, res.Output)
 
-	// The summary is a debug record: at the 1000 RPS target an info line per
-	// request would cost more than the masking. Values never appear — only the
-	// id, the system, byte counts and category counts.
+	// The summary is an info record: the jury asks for the detected PD
+	// categories per request. It is switched off by log.requests for
+	// maximum-RPS runs, and sampling (log.sample_every) still applies on top.
+	// Values never appear — only the id, the system, category counts and byte
+	// counts.
 	lg := logging.L()
-	if lg.Enabled(ctx, slog.LevelDebug) && logging.ShouldSample() {
+	if e.cfg.Get().Log.Requests && logging.ShouldSample() {
 		attrs := logging.RequestAttrs(payloadID, sys.ID, res.Op, len(in))
 		attrs = append(attrs,
 			slog.Int("bytes_out", len(res.Output)),
 			slog.Int("count", res.Spans),
-			slog.Bool("cached", res.Cached),
-			slog.Int64("duration_ms", res.Duration.Milliseconds()),
+			slog.Int("status", 200),
+			slog.Int64("duration_us", res.Duration.Microseconds()),
 			logging.Types(res.Counts),
 		)
-		lg.LogAttrs(ctx, slog.LevelDebug, "processed", attrs...)
+		lg.LogAttrs(ctx, slog.LevelInfo, "request", attrs...)
 	}
 	return res
 }
@@ -641,6 +796,18 @@ func (e *Engine) finish(ctx context.Context, res Result, sys *config.System, pay
 // metrics.Observe again for a request the engine already served.
 func (e *Engine) observe(op string, status int, start time.Time, in, out string) {
 	metrics.Observe(op, status, time.Since(start), metrics.EstimateTokens(in), metrics.EstimateTokens(out))
+}
+
+// stage logs one processing stage at debug level with its duration. Stage
+// names and durations carry no personal data, so they are safe to log.
+func (e *Engine) stage(ctx context.Context, name string, d time.Duration) {
+	if !logging.L().Enabled(ctx, slog.LevelDebug) {
+		return
+	}
+	logging.L().LogAttrs(ctx, slog.LevelDebug, "stage",
+		slog.String("stage", name),
+		slog.Int64("duration_us", d.Microseconds()),
+	)
 }
 
 // looksMasked reports whether s carries the fingerprint of a mask WE produced.

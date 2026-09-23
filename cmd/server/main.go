@@ -25,6 +25,7 @@ import (
 	"pdguard/internal/config"
 	"pdguard/internal/engine"
 	"pdguard/internal/httpapi"
+	"pdguard/internal/llm"
 	"pdguard/internal/logging"
 	"pdguard/internal/metrics"
 	"pdguard/internal/pd/detect"
@@ -103,12 +104,24 @@ func run() error {
 
 	adminToken := os.Getenv("PDGUARD_ADMIN_TOKEN")
 
+	// The LLM API key comes only from the environment, never from the
+	// configuration file, so it cannot leak through /admin/config or a log.
+	llmClient := llm.New(llm.Options{
+		BaseURL: cfg.LLM.BaseURL,
+		Model:   cfg.LLM.Model,
+		Timeout: time.Duration(cfg.LLM.TimeoutMS) * time.Millisecond,
+		Stream:  cfg.LLM.Stream,
+		CAFile:  cfg.LLM.CAFile,
+		APIKey:  os.Getenv("PDGUARD_LLM_API_KEY"),
+	})
+
 	api := httpapi.New(httpapi.Options{
 		Engine:     eng,
 		Cfg:        mgr,
 		Store:      st,
 		Version:    version,
 		AdminToken: adminToken,
+		LLM:        llmClient,
 	})
 
 	listenAddr := firstNonEmpty(*addr, os.Getenv("PDGUARD_ADDR"), cfg.Server.Addr, ":8080")

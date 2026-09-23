@@ -3,6 +3,7 @@ package httpapi
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -144,6 +145,25 @@ func (s *Server) handleAdminConfigPut(w http.ResponseWriter, r *http.Request) {
 	}
 	restoreSecrets(next, s.cfg.Get())
 	if err := s.cfg.Apply(next); err != nil {
+		if errors.Is(err, config.ErrNotPersisted) {
+			// The configuration is live in memory; only the file write failed,
+			// typically because the config directory is mounted read-only. That
+			// is not a rejection — the change works until the next restart.
+			logging.L().Info("configuration applied via /admin/config",
+				"systems", len(next.Systems),
+				"require_system", next.RequireSystem,
+				"fail_open", next.Server.FailOpen,
+			)
+			logging.L().Warn("configuration not persisted; the change will not survive a restart",
+				"err", err.Error(),
+			)
+			s.writeJSON(w, http.StatusOK, map[string]any{
+				"status":    "applied",
+				"persisted": false,
+				"warning":   "applied in memory; the configuration file is read-only, the change will not survive a restart",
+			})
+			return
+		}
 		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -184,16 +204,19 @@ func restoreSecrets(next, cur *config.Config) {
 	}
 }
 
+// handleAdminDetect runs detection over a caller-supplied text and reports the
+// categories and offsets found. It is deliberately open: the demo console calls
+// it without a token, and it only reads — it never changes the running
+// configuration, and its response carries offsets and lengths, never the values
+// themselves (see detectHit).
 func (s *Server) handleAdminDetect(w http.ResponseWriter, r *http.Request) {
-	if !s.adminAuth(w, r) {
-		return
-	}
 	var req detectRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.writeDecodeError(w, err)
 		return
 	}
 	sys := s.resolveDetectSystem(r)
+	s.eng.SyncCustom()
 	out := buildDetectResponse(req.Payload, sys)
 	s.writeJSON(w, http.StatusOK, out)
 }

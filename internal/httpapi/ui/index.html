@@ -3,101 +3,297 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>pdguard — маскирование персональных данных</title>
+<title>pdguard — защита персональных данных в запросах к ИИ</title>
 <style>
-:root { color-scheme: light dark; }
+:root { color-scheme: light; }
 * { box-sizing: border-box; }
-body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; background: #f4f5f7; color: #1c1e21; }
-header { background: #1f2937; color: #fff; padding: 16px 24px; }
-header h1 { margin: 0; font-size: 20px; }
-header p { margin: 4px 0 0; opacity: .8; font-size: 13px; }
-main { max-width: 900px; margin: 24px auto; padding: 0 16px; }
-.card { background: #fff; border: 1px solid #e2e5e9; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
-label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 14px; }
-textarea { width: 100%; min-height: 120px; font-family: ui-monospace, "Cascadia Mono", monospace; font-size: 14px; padding: 10px; border: 1px solid #cbd2d9; border-radius: 6px; resize: vertical; }
-button { background: #2563eb; color: #fff; border: 0; border-radius: 6px; padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; }
-button:hover { background: #1d4ed8; }
-button.secondary { background: #6b7280; }
-button.secondary:hover { background: #4b5563; }
-.row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
-.output { margin-top: 16px; }
-.output h3 { margin: 0 0 8px; font-size: 14px; }
-pre { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+body { font-family: "Golos Text", -apple-system, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; background: #FFFFFF; color: #0B0B0B; }
+header { background: #EF3124; color: #FFFFFF; padding: 20px 24px; }
+.header-inner { max-width: 1080px; margin: 0 auto; display: flex; align-items: center; gap: 16px; }
+.logo { width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; color: #EF3124; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 22px; flex: 0 0 auto; }
+.header-text h1 { margin: 0; font-size: 24px; font-weight: 800; }
+.header-text p { margin: 4px 0 0; font-size: 14px; opacity: .92; }
+main { max-width: 1080px; margin: 28px auto; padding: 0 20px; }
+.card { background: #FFFFFF; border: 1px solid #E4E5E7; border-radius: 20px; padding: 24px; margin-bottom: 20px; }
+.card h2 { margin: 0 0 16px; font-size: 22px; font-weight: 800; }
+label { display: block; font-weight: 700; margin-bottom: 8px; font-size: 14px; }
+textarea { width: 100%; min-height: 120px; font-family: inherit; font-size: 14px; padding: 12px; border: 1px solid #E4E5E7; border-radius: 12px; resize: vertical; background: #FFFFFF; color: #0B0B0B; }
+select { font-family: inherit; font-size: 14px; padding: 10px 12px; border: 1px solid #E4E5E7; border-radius: 12px; background: #FFFFFF; color: #0B0B0B; }
+button { background: #EF3124; color: #FFFFFF; border: 0; border-radius: 12px; padding: 12px 22px; font-size: 15px; font-weight: 700; cursor: pointer; }
+button:hover { background: #C8261A; }
+button.secondary { background: #F3F4F5; color: #0B0B0B; }
+button.secondary:hover { background: #E4E5E7; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
+.examples { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.example { background: #F3F4F5; color: #0B0B0B; border: 1px solid #E4E5E7; border-radius: 999px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.example:hover { background: #E4E5E7; }
+.summary { margin-top: 16px; padding: 14px 16px; border-radius: 12px; font-size: 14px; font-weight: 600; background: #F3F4F5; color: #0B0B0B; }
+.summary.ok { background: #EAF7EE; color: #1B7A3D; }
+.summary.err { background: #FDECEA; color: #C8261A; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.chip { display: inline-block; background: #F3F4F5; color: #6B6B6B; border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 700; }
+.chip.token { background: #C8261A; color: #FFFFFF; }
+.steps { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr) auto minmax(0,1fr); gap: 12px; align-items: stretch; margin-top: 16px; }
+.step { min-width: 0; background: #F3F4F5; border: 1px solid #E4E5E7; border-radius: 20px; padding: 18px; }
+.step h3 { margin: 0 0 10px; font-size: 16px; font-weight: 800; }
+.step-num { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: #EF3124; color: #FFFFFF; font-weight: 800; margin-right: 8px; }
+.step-body { font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.step-body .hl { font-weight: 700; text-decoration: underline; background: #FDECEA; }
+.arrow { align-self: center; font-size: 28px; color: #EF3124; font-weight: 800; }
+.meta { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 12px; font-size: 13px; color: #6B6B6B; }
+.status { font-size: 14px; margin-top: 12px; font-weight: 600; }
+.status.ok { color: #1B7A3D; }
+.status.err { color: #C8261A; }
 .hits { margin-top: 12px; }
 .hits table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.hits th, .hits td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e2e5e9; }
-.hits th { background: #f8fafc; }
-.badge { display: inline-block; background: #eef2ff; color: #3730a3; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 600; }
-.status { font-size: 13px; margin-top: 8px; }
-.status.ok { color: #15803d; }
-.status.err { color: #b91c1c; }
+.hits th, .hits td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #E4E5E7; }
+.hits th { background: #F3F4F5; }
+pre { background: #F3F4F5; color: #0B0B0B; padding: 14px; border-radius: 12px; overflow-x: auto; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; font-family: ui-monospace, "Cascadia Mono", monospace; }
+footer { max-width: 1080px; margin: 8px auto 32px; padding: 0 20px; color: #6B6B6B; font-size: 13px; }
+@media (max-width: 960px) {
+  .steps { grid-template-columns: minmax(0,1fr); }
+  .arrow { transform: rotate(90deg); justify-self: center; }
+}
+@media (max-width: 720px) {
+  .header-inner { flex-wrap: wrap; }
+}
 </style>
 </head>
 <body>
 <header>
-  <h1>pdguard — модуль безопасности персональных данных</h1>
-  <p>Демо-консоль. Введите текст, нажмите «Проверить» — найденные персональные данные будут подсвечены. Ничего не сохраняется.</p>
+  <div class="header-inner">
+    <div class="logo">pd</div>
+    <div class="header-text">
+      <h1>pdguard</h1>
+      <p>Защита персональных данных в запросах к ИИ</p>
+    </div>
+  </div>
 </header>
 <main>
-  <div class="card">
-    <label for="payload">Текст для анализа</label>
-    <textarea id="payload" placeholder="Например: Клиент Иванов Иван Иванович, карта 4509 1234 5678 9012, почта ivanov@example.com."></textarea>
+  <section class="card">
+    <h2>Чат с ИИ через pdguard</h2>
+    <label for="chat">Текст запроса к ИИ</label>
+    <textarea id="chat" placeholder="Например: Составь письмо клиенту Иванов Иван Иванович, паспорт 4509 123456, тел. +7 916 123-45-67."></textarea>
+    <div class="examples">
+      <button type="button" class="example" data-example="letter">Письмо клиенту</button>
+      <button type="button" class="example" data-example="translate">Перевод</button>
+      <button type="button" class="example" data-example="trap">Ловушка</button>
+    </div>
     <div class="row">
-      <button id="run">Проверить</button>
-      <button id="clear" class="secondary">Очистить</button>
+      <label for="system">Система</label>
+      <select id="system">
+        <option value="default">default — с восстановлением</option>
+        <option value="analytics">analytics — без восстановления</option>
+      </select>
+      <button type="button" id="chatRun">Отправить в ИИ</button>
+    </div>
+    <div id="chatStatus" class="status"></div>
+    <div id="chatSummary" class="summary" hidden></div>
+    <div id="chatTypes" class="chips"></div>
+    <div id="chatMeta" class="meta"></div>
+    <div class="steps">
+      <div class="step">
+        <h3><span class="step-num">1</span>Что отправлено в ИИ</h3>
+        <div id="chatMasked" class="step-body">—</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <h3><span class="step-num">2</span>Что ответил ИИ</h3>
+        <div id="chatAnswer" class="step-body">—</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <h3><span class="step-num">3</span>Что получил пользователь</h3>
+        <div id="chatContent" class="step-body">—</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Маскирование и демаскирование (как в ТЗ)</h2>
+    <label for="payload">Текст для анализа</label>
+    <textarea id="payload" placeholder="Например: Клиент Иванов Иван Иванович, паспорт 4509 123456, почта ivanov@example.com."></textarea>
+    <div class="examples">
+      <button type="button" class="example" data-example="tz">Пример из ТЗ</button>
+      <button type="button" class="example" data-example="anketa">Анкета</button>
+    </div>
+    <div class="row">
+      <button type="button" id="mask">Замаскировать</button>
+      <button type="button" id="demask" class="secondary" disabled>Демаскировать</button>
+      <button type="button" id="clear" class="secondary">Очистить</button>
     </div>
     <div id="status" class="status"></div>
-  </div>
-  <div class="card output">
-    <h3>Найденные персональные данные</h3>
     <div id="hits" class="hits"></div>
-  </div>
-  <div class="card output">
-    <h3>Ответ сервиса</h3>
-    <pre id="result">—</pre>
-  </div>
+    <div class="card output">
+      <h3>Что уйдёт в ИИ</h3>
+      <div id="maskResult"></div>
+    </div>
+    <div class="card output">
+      <h3>Что вернулось из ИИ после демаскирования</h3>
+      <div id="demaskResult"></div>
+    </div>
+  </section>
 </main>
+<footer>pdguard · решение команды для хакатона AlfaGen · исходный код — github.com/onaqua/pdguard</footer>
 <script>
 (function () {
-  var payload = document.getElementById('payload');
-  var statusEl = document.getElementById('status');
-  var hitsEl = document.getElementById('hits');
-  var resultEl = document.getElementById('result');
+  const TOKEN_RE = /PD_[A-Z_]+_[0-9a-f]{6}/g;
+  const TYPE_NAMES = {
+    FIO: 'ФИО',
+    BIRTH_DATE: 'дата рождения',
+    BIRTH_PLACE: 'место рождения',
+    PASSPORT: 'паспорт',
+    PASSPORT_ISSUE_DATE: 'дата выдачи',
+    PASSPORT_ISSUER: 'кем выдан',
+    SUBDIVISION_CODE: 'код подразделения',
+    CITIZENSHIP: 'гражданство',
+    DRIVER_LICENSE: 'вод. удостоверение',
+    ADDRESS: 'адрес',
+    COUNTRY: 'страна',
+    POSTAL_CODE: 'индекс',
+    CITY: 'город',
+    STREET: 'улица',
+    HOUSE: 'дом',
+    APARTMENT: 'квартира',
+    EMAIL: 'e-mail',
+    PHONE: 'телефон',
+    INN: 'ИНН',
+    CARD_NUMBER: 'номер карты',
+    CARD_HOLDER: 'держатель карты',
+    CVV: 'CVV',
+    PIN: 'ПИН',
+    SNILS: 'СНИЛС',
+    FOREIGN_PASSPORT: 'загранпаспорт',
+    BIRTH_CERTIFICATE: 'свид. о рождении',
+    MILITARY_ID: 'военный билет',
+    RESIDENCE_PERMIT: 'вид на жительство',
+    OMS_POLICY: 'полис ОМС',
+    BANK_ACCOUNT: 'счёт'
+  };
+  const EXAMPLES = {
+    letter: 'Составь короткое вежливое письмо клиенту: Иванов Иван Иванович, паспорт 4509 123456 проверен, карта 4276 3801 2345 6789 перевыпущена, позвоним по номеру +7 916 123-45-67.',
+    translate: 'Переведи на английский: Держатель карты IVAN IVANOV, счёт 40817810099910004312.',
+    trap: 'Кто такой Александр Пушкин? Ответь одним предложением.',
+    tz: 'Клиент Иванов Иван Иванович, паспорт 4509 123456',
+    anketa: 'Клиент Петрова Анна Сергеевна, дата рождения 12.03.1985, СНИЛС 112-233-445 95, почта anna.petrova@mail.ru, адрес г. Москва, ул. Тверская, д. 7, кв. 12.'
+  };
 
-  function setStatus(text, ok) {
-    statusEl.textContent = text;
-    statusEl.className = 'status ' + (ok ? 'ok' : 'err');
+  const payload = document.getElementById('payload');
+  const statusEl = document.getElementById('status');
+  const hitsEl = document.getElementById('hits');
+  const maskResultEl = document.getElementById('maskResult');
+  const demaskResultEl = document.getElementById('demaskResult');
+  const maskBtn = document.getElementById('mask');
+  const demaskBtn = document.getElementById('demask');
+
+  const chatEl = document.getElementById('chat');
+  const systemEl = document.getElementById('system');
+  const chatStatusEl = document.getElementById('chatStatus');
+  const chatSummaryEl = document.getElementById('chatSummary');
+  const chatTypesEl = document.getElementById('chatTypes');
+  const chatMetaEl = document.getElementById('chatMeta');
+  const chatMaskedEl = document.getElementById('chatMasked');
+  const chatAnswerEl = document.getElementById('chatAnswer');
+  const chatContentEl = document.getElementById('chatContent');
+
+  let currentId = null;
+  let currentResult = null;
+
+  function setStatus(el, text, ok) {
+    el.textContent = text;
+    el.className = 'status ' + (ok ? 'ok' : 'err');
+  }
+
+  function clearChildren(el) {
+    while (el.firstChild) {
+      el.removeChild(el.firstChild);
+    }
+  }
+
+  function typeName(code) {
+    return TYPE_NAMES[code] || code;
+  }
+
+  function plural(n) {
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return 'фрагмент';
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'фрагмента';
+    return 'фрагментов';
+  }
+
+  function sliceBytes(text, start, end) {
+    const bytes = new TextEncoder().encode(text);
+    return new TextDecoder().decode(bytes.slice(start, end));
   }
 
   function renderHits(data) {
+    clearChildren(hitsEl);
     if (!data || !data.spans || data.spans.length === 0) {
-      hitsEl.innerHTML = '<p>Персональные данные не найдены.</p>';
+      const p = document.createElement('p');
+      p.textContent = 'Персональные данные не найдены.';
+      hitsEl.appendChild(p);
       return;
     }
-    var rows = data.spans.map(function (sp) {
-      return '<tr><td><span class="badge">' + escapeHtml(sp.type) + '</span></td>' +
-        '<td>' + sp.start + '…' + sp.end + '</td>' +
-        '<td>' + sp.len + '</td>' +
-        '<td>' + sp.conf.toFixed(2) + '</td>' +
-        '<td>' + escapeHtml(sp.src) + '</td></tr>';
-    }).join('');
-    hitsEl.innerHTML = '<table><thead><tr><th>Тип</th><th>Смещение</th><th>Длина</th><th>Уверенность</th><th>Детектор</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    ['Тип', 'Фрагмент', 'Уверенность', 'Детектор'].forEach(function (h) {
+      const th = document.createElement('th');
+      th.textContent = h;
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    data.spans.forEach(function (sp) {
+      const tr = document.createElement('tr');
+      const tdType = document.createElement('td');
+      const badge = document.createElement('span');
+      badge.className = 'chip';
+      badge.textContent = typeName(sp.type);
+      tdType.appendChild(badge);
+      tr.appendChild(tdType);
+      const tdFrag = document.createElement('td');
+      tdFrag.textContent = sliceBytes(payload.value, sp.start, sp.end);
+      tr.appendChild(tdFrag);
+      const tdConf = document.createElement('td');
+      tdConf.textContent = sp.conf.toFixed(2);
+      tr.appendChild(tdConf);
+      const tdSrc = document.createElement('td');
+      tdSrc.textContent = sp.src;
+      tr.appendChild(tdSrc);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    hitsEl.appendChild(table);
   }
 
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  function genId() {
+    const arr = new Uint8Array(16);
+    crypto.getRandomValues(arr);
+    let hex = '';
+    for (let i = 0; i < arr.length; i++) {
+      hex += arr[i].toString(16).padStart(2, '0');
+    }
+    return hex;
+  }
+
+  function postProcess(payloadText, id) {
+    return fetch('/process', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payload: payloadText, payload_id: id })
+    }).then(function (resp) {
+      return resp.json().then(function (data) {
+        return { ok: resp.ok, code: resp.status, data: data };
+      });
     });
   }
 
-  function run() {
-    var text = payload.value;
-    if (!text) {
-      setStatus('Введите текст для анализа.', false);
-      return;
-    }
-    setStatus('Анализ…', true);
-    fetch('/admin/detect', {
+  function postDetect(text) {
+    return fetch('/admin/detect', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ payload: text })
@@ -105,25 +301,320 @@ pre { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 6px; ov
       return resp.json().then(function (data) {
         return { ok: resp.ok, data: data };
       });
-    }).then(function (res) {
-      if (!res.ok) {
-        setStatus('Ошибка сервиса: ' + (res.data && res.data.error ? res.data.error : 'неизвестная'), false);
-        return;
-      }
-      renderHits(res.data);
-      resultEl.textContent = JSON.stringify(res.data, null, 2);
-      setStatus('Найдено записей: ' + res.data.count, true);
-    }).catch(function (err) {
-      setStatus('Сетевая ошибка: ' + err.message, false);
     });
   }
 
-  document.getElementById('run').addEventListener('click', run);
-  document.getElementById('clear').addEventListener('click', function () {
+  function processError(code, data) {
+    return 'Ошибка /process ' + code + ': ' + (data && data.error ? data.error : 'неизвестная');
+  }
+
+  function renderMaskResult(result, id) {
+    clearChildren(maskResultEl);
+    const pre = document.createElement('pre');
+    pre.textContent = result;
+    maskResultEl.appendChild(pre);
+    const idLine = document.createElement('div');
+    idLine.className = 'meta';
+    idLine.textContent = 'payload_id: ' + id;
+    maskResultEl.appendChild(idLine);
+  }
+
+  function renderDemaskResult(result) {
+    clearChildren(demaskResultEl);
+    const pre = document.createElement('pre');
+    pre.textContent = result;
+    demaskResultEl.appendChild(pre);
+    const badge = document.createElement('div');
+    const same = result === payload.value;
+    badge.className = 'summary ' + (same ? 'ok' : 'err');
+    badge.textContent = same ? 'Совпадает с исходным текстом байт в байт' : 'Отличается от исходного';
+    demaskResultEl.appendChild(badge);
+  }
+
+  function mask() {
+    const text = payload.value;
+    if (!text) {
+      setStatus(statusEl, 'Введите текст для анализа.', false);
+      return;
+    }
+    const id = genId();
+    setStatus(statusEl, 'Маскирование…', true);
+    clearChildren(hitsEl);
+    clearChildren(maskResultEl);
+    clearChildren(demaskResultEl);
+    demaskBtn.disabled = true;
+    Promise.all([postProcess(text, id), postDetect(text)]).then(function (results) {
+      const proc = results[0];
+      const det = results[1];
+      if (!proc.ok) {
+        setStatus(statusEl, processError(proc.code, proc.data), false);
+        return;
+      }
+      renderMaskResult(proc.data.result, id);
+      renderHits(det.data);
+      currentId = id;
+      currentResult = proc.data.result;
+      demaskBtn.disabled = false;
+      setStatus(statusEl, 'Замаскировано.', true);
+    }).catch(function (err) {
+      setStatus(statusEl, 'Сетевая ошибка: ' + err.message, false);
+    });
+  }
+
+  function demask() {
+    if (currentId === null || currentResult === null) {
+      return;
+    }
+    setStatus(statusEl, 'Демаскирование…', true);
+    postProcess(currentResult, currentId).then(function (proc) {
+      if (!proc.ok) {
+        setStatus(statusEl, processError(proc.code, proc.data), false);
+        return;
+      }
+      renderDemaskResult(proc.data.result);
+      setStatus(statusEl, 'Демаскировано.', true);
+    }).catch(function (err) {
+      setStatus(statusEl, 'Сетевая ошибка: ' + err.message, false);
+    });
+  }
+
+  function clearAll() {
     payload.value = '';
-    hitsEl.innerHTML = '';
-    resultEl.textContent = '—';
-    setStatus('', true);
+    clearChildren(hitsEl);
+    clearChildren(maskResultEl);
+    clearChildren(demaskResultEl);
+    currentId = null;
+    currentResult = null;
+    demaskBtn.disabled = true;
+    setStatus(statusEl, '', true);
+  }
+
+  maskBtn.addEventListener('click', mask);
+  demaskBtn.addEventListener('click', demask);
+  document.getElementById('clear').addEventListener('click', clearAll);
+
+  function renderTokens(container, text) {
+    clearChildren(container);
+    if (!text) {
+      container.textContent = '—';
+      return;
+    }
+    let last = 0;
+    let match;
+    TOKEN_RE.lastIndex = 0;
+    while ((match = TOKEN_RE.exec(text)) !== null) {
+      if (match.index > last) {
+        container.appendChild(document.createTextNode(text.slice(last, match.index)));
+      }
+      const chip = document.createElement('span');
+      chip.className = 'chip token';
+      chip.textContent = match[0];
+      container.appendChild(chip);
+      last = match.index + match[0].length;
+    }
+    if (last < text.length) {
+      container.appendChild(document.createTextNode(text.slice(last)));
+    }
+  }
+
+  function renderRestored(container, answer, content) {
+    clearChildren(container);
+    if (!content) {
+      container.textContent = '—';
+      return;
+    }
+    if (!answer) {
+      container.textContent = content;
+      return;
+    }
+    const pieces = answer.split(TOKEN_RE);
+    if (pieces.length < 2) {
+      container.textContent = content;
+      return;
+    }
+    let pos = 0;
+    let ok = true;
+    const nodes = [];
+    for (let i = 0; i < pieces.length; i++) {
+      const lit = pieces[i];
+      if (lit.length > 0) {
+        const idx = content.indexOf(lit, pos);
+        if (idx < 0) {
+          ok = false;
+          break;
+        }
+        if (idx > pos) {
+          const span = document.createElement('span');
+          span.className = 'hl';
+          span.textContent = content.slice(pos, idx);
+          nodes.push(span);
+        }
+        nodes.push(document.createTextNode(lit));
+        pos = idx + lit.length;
+      }
+    }
+    if (ok && pos < content.length) {
+      const span = document.createElement('span');
+      span.className = 'hl';
+      span.textContent = content.slice(pos);
+      nodes.push(span);
+    }
+    if (!ok) {
+      container.textContent = content;
+      return;
+    }
+    nodes.forEach(function (n) {
+      container.appendChild(n);
+    });
+  }
+
+  function hasTokens(text) {
+    TOKEN_RE.lastIndex = 0;
+    return TOKEN_RE.test(text);
+  }
+
+  function countTokens(text) {
+    const set = new Set();
+    let match;
+    TOKEN_RE.lastIndex = 0;
+    while ((match = TOKEN_RE.exec(text)) !== null) {
+      set.add(match[0]);
+    }
+    return set.size;
+  }
+
+  function summaryText(n) {
+    if (n === 1) {
+      return 'В ИИ не ушло ни одного персонального значения: 1 фрагмент заменён токеном';
+    }
+    return 'В ИИ не ушло ни одного персонального значения: ' + n + ' ' + plural(n) + ' заменены токенами';
+  }
+
+  function renderChatTypes(types) {
+    clearChildren(chatTypesEl);
+    types.forEach(function (t) {
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.textContent = typeName(t);
+      chatTypesEl.appendChild(chip);
+    });
+  }
+
+  function renderChatMeta(timings) {
+    const parts = [];
+    function fmt(v) {
+      return v === 0 ? '<1 мс' : v + ' мс';
+    }
+    if (timings.mask !== undefined) {
+      parts.push('маскирование: ' + fmt(timings.mask));
+    }
+    if (timings.llm !== undefined) {
+      parts.push('ИИ: ' + fmt(timings.llm));
+    }
+    if (timings.restore !== undefined) {
+      parts.push('восстановление: ' + fmt(timings.restore));
+    }
+    chatMetaEl.textContent = parts.join(' · ');
+  }
+
+  function renderChatContent(answer, content) {
+    if (hasTokens(content)) {
+      renderTokens(chatContentEl, content);
+      const note = document.createElement('div');
+      note.className = 'summary err';
+      note.textContent = 'Этой системе восстановление запрещено — пользователь получил токены, персональные данные не раскрыты';
+      chatContentEl.appendChild(note);
+      return;
+    }
+    renderRestored(chatContentEl, answer, content);
+  }
+
+  function renderChatResult(res) {
+    const pg = res.data.pdguard || {};
+    const masked = (pg.masked_messages || []).map(function (m) { return m.content; }).join('\n');
+    const answer = pg.llm_answer || '';
+    const content = res.data.choices && res.data.choices[0] && res.data.choices[0].message
+      ? res.data.choices[0].message.content : '';
+
+    renderTokens(chatMaskedEl, masked);
+    renderTokens(chatAnswerEl, answer);
+    renderChatContent(answer, content);
+
+    renderChatTypes(pg.pd_types || []);
+    renderChatMeta(pg.timings_ms || {});
+
+    const n = countTokens(masked);
+    chatSummaryEl.hidden = false;
+    chatSummaryEl.className = 'summary ' + (n === 0 ? 'ok' : 'ok');
+    chatSummaryEl.textContent = n === 0
+      ? 'Персональных данных не найдено — текст отправлен как есть'
+      : summaryText(n);
+    setStatus(chatStatusEl, 'Готово.', true);
+  }
+
+  function errorMessage(code, data) {
+    if (code === 422) {
+      return 'Остановлено: в тексте осталось незакрытое ПД, запрос в ИИ не отправлен';
+    }
+    if (code === 503) {
+      return 'Маскирование не удалось — запрос в ИИ не отправлен';
+    }
+    if (code === 502) {
+      return 'ИИ сейчас недоступен';
+    }
+    if (code === 429) {
+      return 'Слишком много запросов, подождите минуту';
+    }
+    return 'Ошибка ' + code + ': ' + (data && data.error ? data.error : 'неизвестная');
+  }
+
+  function runChat() {
+    const text = chatEl.value;
+    if (!text) {
+      setStatus(chatStatusEl, 'Введите текст для отправки в ИИ.', false);
+      return;
+    }
+    setStatus(chatStatusEl, 'Маскирование и вызов ИИ…', true);
+    chatSummaryEl.hidden = true;
+    chatSummaryEl.textContent = '';
+    clearChildren(chatTypesEl);
+    chatMetaEl.textContent = '';
+    fetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-PDGuard-Debug': '1',
+        'X-System-Id': systemEl.value
+      },
+      body: JSON.stringify({ messages: [{ role: 'user', content: text }] })
+    }).then(function (resp) {
+      return resp.json().then(function (data) {
+        return { ok: resp.ok, code: resp.status, data: data };
+      });
+    }).then(function (res) {
+      if (!res.ok) {
+        setStatus(chatStatusEl, errorMessage(res.code, res.data), false);
+        chatSummaryEl.hidden = false;
+        chatSummaryEl.className = 'summary err';
+        chatSummaryEl.textContent = errorMessage(res.code, res.data);
+        return;
+      }
+      renderChatResult(res);
+    }).catch(function (err) {
+      setStatus(chatStatusEl, 'Сетевая ошибка: ' + err.message, false);
+    });
+  }
+
+  document.getElementById('chatRun').addEventListener('click', runChat);
+  document.querySelectorAll('.example').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const target = btn.getAttribute('data-example');
+      if (target === 'tz' || target === 'anketa') {
+        payload.value = EXAMPLES[target] || '';
+      } else {
+        chatEl.value = EXAMPLES[target] || '';
+      }
+    });
   });
 })();
 </script>

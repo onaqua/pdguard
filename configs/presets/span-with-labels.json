@@ -20,10 +20,20 @@
   "log": {
     "level": "info",
     "format": "json",
-    "sample_every": 0
+    "sample_every": 0,
+    "requests": true
   },
   "masking": {
     "span_include_labels": true
+  },
+  "llm": {
+    "base_url": "",
+    "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+    "timeout_ms": 60000,
+    "stream": true,
+    "ca_file": "",
+    "strategy": "token",
+    "requests_per_minute": 60
   },
   "default_system": "default",
   "require_system": false,
@@ -505,5 +515,6 @@
         }
       }
     }
-  ]
+  ],
+  "dictionaries": {}
 }

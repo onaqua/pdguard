@@ -28,6 +28,7 @@ import (
 
 	"pdguard/internal/config"
 	"pdguard/internal/engine"
+	"pdguard/internal/llm"
 	"pdguard/internal/logging"
 	"pdguard/internal/metrics"
 	"pdguard/internal/pd/detect"
@@ -39,6 +40,7 @@ import (
 // Route paths, named so the middleware and the tests cannot drift from the mux.
 const (
 	pathProcess       = "/process"
+	pathChat          = "/v1/chat/completions"
 	pathHealth        = "/health"
 	pathReady         = "/ready"
 	pathMetrics       = "/metrics"
@@ -106,6 +108,9 @@ type Options struct {
 	// PDGUARD_ADMIN_TOKEN so the secret never has to live in a file that
 	// /admin/config hands back out.
 	AdminToken string
+	// LLM serves /v1/chat/completions. Optional: when nil the chat route
+	// answers 503, which is the honest answer for a build without an upstream.
+	LLM *llm.Client
 }
 
 // Server is the HTTP front end. One instance serves every request; the only
@@ -115,6 +120,7 @@ type Server struct {
 	eng        *engine.Engine
 	cfg        *config.Manager
 	store      store.Store
+	llm        *llm.Client
 	version    string
 	adminToken string
 
@@ -134,6 +140,11 @@ type Server struct {
 	// single syscall.
 	bufs sync.Pool
 
+	// llmLimit caps the number of LLM calls per minute. Its capacity is
+	// re-synced from the live configuration on every chat request, so an
+	// operator can change the limit on the fly via /admin/config.
+	llmLimit *llmLimiter
+
 	handler http.Handler
 	started time.Time
 }
@@ -151,6 +162,7 @@ func New(o Options) *Server {
 		eng:        o.Engine,
 		cfg:        o.Cfg,
 		store:      o.Store,
+		llm:        o.LLM,
 		version:    o.Version,
 		adminToken: o.AdminToken,
 		started:    time.Now(),
@@ -159,6 +171,7 @@ func New(o Options) *Server {
 		s.version = metrics.Version
 	}
 	s.bufs.New = func() any { return new(bytes.Buffer) }
+	s.llmLimit = newLLMLimiter(o.Cfg.Get().LLM.RequestsPerMinute)
 	if n := o.Cfg.Get().Server.MaxConcurrent; n > 0 {
 		s.sem = make(chan struct{}, n)
 	}
@@ -192,6 +205,7 @@ func (s *Server) build() http.Handler {
 	// header for free, which is a better answer than routing a GET /process
 	// into a handler that would report a missing body.
 	mux.HandleFunc("POST "+pathProcess, s.handleProcess)
+	mux.HandleFunc("POST "+pathChat, s.handleChat)
 	mux.HandleFunc("GET "+pathHealth, s.handleHealth)
 	mux.HandleFunc("GET "+pathReady, s.handleReady)
 	mux.HandleFunc("GET "+pathMetrics, s.handleMetrics)

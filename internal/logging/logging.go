@@ -27,6 +27,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"regexp"
@@ -60,6 +61,7 @@ var safeKeys = map[string]bool{
 	"count":       true,
 	"detector":    true,
 	"strategy":    true,
+	"stage":       true,
 	"error_kind":  true,
 	"len":         true,
 	"fp":          true,
@@ -126,12 +128,19 @@ func init() {
 // "text" and "info" rather than failing: losing a log line format is never a
 // reason to refuse to start.
 func Setup(level, format string) {
+	SetupWriter(level, format, os.Stderr)
+}
+
+// SetupWriter configures the process-wide logger to write to w instead of
+// stderr. It is a test hook: the engine and httpapi tests want to assert on
+// the bytes the logger would have written without touching the real one.
+func SetupWriter(level, format string, w io.Writer) {
 	opts := &slog.HandlerOptions{Level: parseLevel(level)}
 	var h slog.Handler
 	if strings.EqualFold(format, "json") {
-		h = slog.NewJSONHandler(os.Stderr, opts)
+		h = slog.NewJSONHandler(w, opts)
 	} else {
-		h = slog.NewTextHandler(os.Stderr, opts)
+		h = slog.NewTextHandler(w, opts)
 	}
 	l := slog.New(&scrubHandler{inner: h})
 	current.Store(l)

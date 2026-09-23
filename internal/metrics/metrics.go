@@ -38,6 +38,11 @@ var Version = "dev"
 
 const labelOther = "other"
 
+// LabelCustom is the metric label under which every user-defined PD type is
+// counted. The label set is closed on purpose, so a configuration-driven type
+// name can never mint a new Prometheus series.
+const LabelCustom = "custom"
+
 // Known operation labels. Anything else becomes "other".
 var opNames = []string{"mask", "demask", labelOther}
 
@@ -51,7 +56,7 @@ var statusCodes = []int{
 // Known shed reasons for IncRejected.
 var rejectReasons = []string{
 	"inflight_limit", "queue_timeout", "rate_limit", "body_too_large",
-	"shutting_down", labelOther,
+	"llm_rate", "shutting_down", labelOther,
 }
 
 // latencyBounds are the histogram upper bounds in seconds. They are clustered
@@ -248,13 +253,16 @@ func init() {
 	}
 
 	// The PD categories come from the shared catalogue so the metric label set
-	// can never drift away from the types detectors actually emit.
-	pdDetected = make(map[string]*atomic.Int64, len(pd.AllTypes)+1)
-	pdOrder = make([]string, 0, len(pd.AllTypes)+1)
+	// can never drift away from the types detectors actually emit. Custom types
+	// are folded under a single "custom" label.
+	pdDetected = make(map[string]*atomic.Int64, len(pd.AllTypes)+2)
+	pdOrder = make([]string, 0, len(pd.AllTypes)+2)
 	for _, t := range pd.AllTypes {
 		pdDetected[string(t)] = new(atomic.Int64)
 		pdOrder = append(pdOrder, string(t))
 	}
+	pdDetected[LabelCustom] = new(atomic.Int64)
+	pdOrder = append(pdOrder, LabelCustom)
 	pdDetected[labelOther] = new(atomic.Int64)
 	pdOrder = append(pdOrder, labelOther)
 
