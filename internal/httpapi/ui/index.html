@@ -8,9 +8,9 @@
 :root { color-scheme: light; }
 * { box-sizing: border-box; }
 body { font-family: "Golos Text", -apple-system, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; background: #FFFFFF; color: #0B0B0B; }
-header { background: #EF3124; color: #FFFFFF; padding: 20px 24px; }
+header { background: #D9281B; color: #FFFFFF; padding: 20px 24px; }
 .header-inner { max-width: 1080px; margin: 0 auto; display: flex; align-items: center; gap: 16px; }
-.logo { width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; color: #EF3124; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 22px; flex: 0 0 auto; }
+.logo { width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; color: #D9281B; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 22px; flex: 0 0 auto; }
 .header-text h1 { margin: 0; font-size: 24px; font-weight: 800; }
 .header-text p { margin: 4px 0 0; font-size: 14px; opacity: .92; }
 main { max-width: 1080px; margin: 28px auto; padding: 0 20px; }
@@ -19,7 +19,7 @@ main { max-width: 1080px; margin: 28px auto; padding: 0 20px; }
 label { display: block; font-weight: 700; margin-bottom: 8px; font-size: 14px; }
 textarea { width: 100%; min-height: 120px; font-family: inherit; font-size: 14px; padding: 12px; border: 1px solid #E4E5E7; border-radius: 12px; resize: vertical; background: #FFFFFF; color: #0B0B0B; }
 select { font-family: inherit; font-size: 14px; padding: 10px 12px; border: 1px solid #E4E5E7; border-radius: 12px; background: #FFFFFF; color: #0B0B0B; }
-button { background: #EF3124; color: #FFFFFF; border: 0; border-radius: 12px; padding: 12px 22px; font-size: 15px; font-weight: 700; cursor: pointer; }
+button { background: #D9281B; color: #FFFFFF; border: 0; border-radius: 12px; padding: 12px 22px; font-size: 15px; font-weight: 700; cursor: pointer; }
 button:hover { background: #C8261A; }
 button.secondary { background: #F3F4F5; color: #0B0B0B; }
 button.secondary:hover { background: #E4E5E7; }
@@ -37,10 +37,10 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .steps { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr) auto minmax(0,1fr); gap: 12px; align-items: stretch; margin-top: 16px; }
 .step { min-width: 0; background: #F3F4F5; border: 1px solid #E4E5E7; border-radius: 20px; padding: 18px; }
 .step h3 { margin: 0 0 10px; font-size: 16px; font-weight: 800; }
-.step-num { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: #EF3124; color: #FFFFFF; font-weight: 800; margin-right: 8px; }
+.step-num { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: #D9281B; color: #FFFFFF; font-weight: 800; margin-right: 8px; }
 .step-body { font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .step-body .hl { font-weight: 700; text-decoration: underline; background: #FDECEA; }
-.arrow { align-self: center; font-size: 28px; color: #EF3124; font-weight: 800; }
+.arrow { align-self: center; font-size: 28px; color: #D9281B; font-weight: 800; }
 .meta { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 12px; font-size: 13px; color: #6B6B6B; }
 .status { font-size: 14px; margin-top: 12px; font-weight: 600; }
 .status.ok { color: #1B7A3D; }
@@ -207,7 +207,7 @@ footer { max-width: 1080px; margin: 8px auto 32px; padding: 0 20px; color: #6B6B
 
   function clearChildren(el) {
     while (el.firstChild) {
-      el.removeChild(el.firstChild);
+      el.firstChild.remove();
     }
   }
 
@@ -274,8 +274,8 @@ footer { max-width: 1080px; margin: 8px auto 32px; padding: 0 20px; color: #6B6B
     const arr = new Uint8Array(16);
     crypto.getRandomValues(arr);
     let hex = '';
-    for (let i = 0; i < arr.length; i++) {
-      hex += arr[i].toString(16).padStart(2, '0');
+    for (const b of arr) {
+      hex += b.toString(16).padStart(2, '0');
     }
     return hex;
   }
@@ -435,8 +435,7 @@ footer { max-width: 1080px; margin: 8px auto 32px; padding: 0 20px; color: #6B6B
     let pos = 0;
     let ok = true;
     const nodes = [];
-    for (let i = 0; i < pieces.length; i++) {
-      const lit = pieces[i];
+    for (const lit of pieces) {
       if (lit.length > 0) {
         const idx = content.indexOf(lit, pos);
         if (idx < 0) {
@@ -500,19 +499,20 @@ footer { max-width: 1080px; margin: 8px auto 32px; padding: 0 20px; color: #6B6B
     });
   }
 
+  function fmtMs(v) {
+    return v === 0 ? '<1 мс' : v + ' мс';
+  }
+
   function renderChatMeta(timings) {
     const parts = [];
-    function fmt(v) {
-      return v === 0 ? '<1 мс' : v + ' мс';
-    }
     if (timings.mask !== undefined) {
-      parts.push('маскирование: ' + fmt(timings.mask));
+      parts.push('маскирование: ' + fmtMs(timings.mask));
     }
     if (timings.llm !== undefined) {
-      parts.push('ИИ: ' + fmt(timings.llm));
+      parts.push('ИИ: ' + fmtMs(timings.llm));
     }
     if (timings.restore !== undefined) {
-      parts.push('восстановление: ' + fmt(timings.restore));
+      parts.push('восстановление: ' + fmtMs(timings.restore));
     }
     chatMetaEl.textContent = parts.join(' · ');
   }
@@ -545,7 +545,7 @@ footer { max-width: 1080px; margin: 8px auto 32px; padding: 0 20px; color: #6B6B
 
     const n = countTokens(masked);
     chatSummaryEl.hidden = false;
-    chatSummaryEl.className = 'summary ' + (n === 0 ? 'ok' : 'ok');
+    chatSummaryEl.className = 'summary ok';
     chatSummaryEl.textContent = n === 0
       ? 'Персональных данных не найдено — текст отправлен как есть'
       : summaryText(n);
@@ -608,7 +608,7 @@ footer { max-width: 1080px; margin: 8px auto 32px; padding: 0 20px; color: #6B6B
   document.getElementById('chatRun').addEventListener('click', runChat);
   document.querySelectorAll('.example').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      const target = btn.getAttribute('data-example');
+      const target = btn.dataset.example;
       if (target === 'tz' || target === 'anketa') {
         payload.value = EXAMPLES[target] || '';
       } else {
