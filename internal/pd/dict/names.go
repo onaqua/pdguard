@@ -123,19 +123,23 @@ func addNameForms(m map[string]NameForm, src set, bit NameForm, endings, restore
 				m[w+e] |= bit
 			}
 		}
-		// A nominative ending in "-й"/"-ь"/"-я"/"-а" loses that letter before
-		// a case ending: "Андрей" -> "Андрея", "Игорь" -> "Игоря".
-		for _, tail := range restores {
-			if !strings.HasSuffix(w, tail) {
-				continue
-			}
-			stem := w[:len(w)-len(tail)]
-			if utf8.RuneCountInString(stem) < nameMinStemRunes {
-				continue
-			}
-			for _, e := range endings {
-				m[stem+e] |= bit
-			}
+		addRestoredForms(m, w, bit, endings, restores)
+	}
+}
+
+// addRestoredForms indexes the oblique forms reached by dropping a nominative
+// tail ("Андрей" -> "Андрея") and appending each case ending.
+func addRestoredForms(m map[string]NameForm, w string, bit NameForm, endings, restores []string) {
+	for _, tail := range restores {
+		if !strings.HasSuffix(w, tail) {
+			continue
+		}
+		stem := w[:len(w)-len(tail)]
+		if utf8.RuneCountInString(stem) < nameMinStemRunes {
+			continue
+		}
+		for _, e := range endings {
+			m[stem+e] |= bit
 		}
 	}
 }
@@ -233,12 +237,26 @@ func patronymicShape(w string, shapes []patShape) bool {
 // chosen for an ambiguous inflection is deterministic across processes: the
 // word as written wins over any stem derived from another word.
 func buildFamousForms() {
+	words := sortedFamousWords()
+	buildFamousWordForms(words)
+	buildFamousSurnameForms()
+	buildFamousSetsN()
+}
+
+// sortedFamousWords returns the famous vocabulary as a sorted slice, so the
+// canonical form chosen for an ambiguous inflection is deterministic.
+func sortedFamousWords() []string {
 	words := make([]string, 0, len(famousWords))
 	for w := range famousWords {
 		words = append(words, w)
 	}
 	sort.Strings(words)
+	return words
+}
 
+// buildFamousWordForms maps every inflected word of the famous vocabulary onto
+// its nominative form ("пушкина" -> "пушкин").
+func buildFamousWordForms(words []string) {
 	famousWordForms = make(map[string]string, len(words)*20)
 	for _, w := range words {
 		famousWordForms[w] = w
@@ -252,20 +270,30 @@ func buildFamousForms() {
 		}
 	}
 	for _, w := range words {
-		for _, tail := range nameRestoreTails {
-			if !strings.HasSuffix(w, tail) {
-				continue
-			}
-			stem := w[:len(w)-len(tail)]
-			if utf8.RuneCountInString(stem) < nameMinStemRunes {
-				continue
-			}
-			for _, e := range nameCaseEndings {
-				addIfAbsent(famousWordForms, stem+e, w)
-			}
+		addRestoredWordForms(famousWordForms, w)
+	}
+}
+
+// addRestoredWordForms maps the oblique forms of w reached by dropping a
+// nominative tail ("Андрей" -> "Андрея") onto w.
+func addRestoredWordForms(m map[string]string, w string) {
+	for _, tail := range nameRestoreTails {
+		if !strings.HasSuffix(w, tail) {
+			continue
+		}
+		stem := w[:len(w)-len(tail)]
+		if utf8.RuneCountInString(stem) < nameMinStemRunes {
+			continue
+		}
+		for _, e := range nameCaseEndings {
+			addIfAbsent(m, stem+e, w)
 		}
 	}
+}
 
+// buildFamousSurnameForms indexes the inflected forms of the surnames that
+// alone identify a public figure.
+func buildFamousSurnameForms() {
 	famousSurnameForms = make(set, len(famousLast)*34)
 	src := make(set, len(famousLast)+len(famous))
 	for w := range famousLast {
@@ -285,20 +313,29 @@ func buildFamousForms() {
 				famousSurnameForms[w+e] = struct{}{}
 			}
 		}
-		for _, tail := range nameRestoreTails {
-			if !strings.HasSuffix(w, tail) {
-				continue
-			}
-			stem := w[:len(w)-len(tail)]
-			if utf8.RuneCountInString(stem) < nameMinStemRunes {
-				continue
-			}
-			for _, e := range nameCaseEndings {
-				famousSurnameForms[stem+e] = struct{}{}
-			}
+		addRestoredSurnameForms(w)
+	}
+}
+
+// addRestoredSurnameForms indexes the oblique forms of a famous surname word
+// reached by dropping a nominative tail.
+func addRestoredSurnameForms(w string) {
+	for _, tail := range nameRestoreTails {
+		if !strings.HasSuffix(w, tail) {
+			continue
+		}
+		stem := w[:len(w)-len(tail)]
+		if utf8.RuneCountInString(stem) < nameMinStemRunes {
+			continue
+		}
+		for _, e := range nameCaseEndings {
+			famousSurnameForms[stem+e] = struct{}{}
 		}
 	}
+}
 
+// buildFamousSetsN rebuilds the full-name set under an array key.
+func buildFamousSetsN() {
 	famousSetsN = make(map[[FamousSetMaxWords]string]struct{}, len(famous))
 	for full := range famous {
 		parts := strings.Fields(full)

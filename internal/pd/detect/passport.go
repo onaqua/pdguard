@@ -133,6 +133,26 @@ const (
 	ppCitizenMaxWords = 3
 )
 
+// ppWord* are the authority and region vocabulary words that recur across the
+// tables below. Hoisting them into constants keeps the duplicated literals out
+// of the source (go:S1192) without changing the values.
+const (
+	ppWordOtdel         = "отдел"
+	ppWordOtdelom       = "отделом"
+	ppWordOtdela        = "отдела"
+	ppWordOtdeleniem    = "отделением"
+	ppWordOtdelenie     = "отделение"
+	ppWordOtdeleniya    = "отделения"
+	ppWordUpravleniem   = "управлением"
+	ppWordUpravleniya   = "управления"
+	ppWordUpravlenie    = "управление"
+	ppWordMigratsionnoy = "миграционной"
+	ppWordVizovoy       = "визовой"
+	ppWordVydachi       = "выдачи"
+	ppWordRespublika    = "республика"
+	ppWordRespubliki    = "республики"
+)
+
 // ppMaxStems bounds the cursor array ppFindStems keeps on the stack. Making it
 // a compile-time constant is what keeps that scan free of allocations; it must
 // stay >= the longest stem table below.
@@ -177,12 +197,7 @@ func ppFindStems(s string, stems []ppStem, fn func(stem, start, end int)) {
 		next[i] = strings.Index(s, stems[i].lit)
 	}
 	for {
-		best := -1
-		for i := 0; i < n; i++ {
-			if next[i] >= 0 && (best < 0 || next[i] < next[best]) {
-				best = i
-			}
-		}
+		best := ppBestStem(next, n)
 		if best < 0 {
 			return
 		}
@@ -191,12 +206,29 @@ func ppFindStems(s string, stems []ppStem, fn func(stem, start, end int)) {
 		if end, ok := st.tail(s, pos+len(st.lit)); ok {
 			fn(best, pos, end)
 		}
-		if j := strings.Index(s[pos+1:], st.lit); j >= 0 {
-			next[best] = pos + 1 + j
-		} else {
-			next[best] = -1
+		next[best] = ppNextStemPos(s, pos, st.lit)
+	}
+}
+
+// ppBestStem returns the index of the stem whose next occurrence is earliest,
+// or -1 when no stem has a pending occurrence.
+func ppBestStem(next [ppMaxStems]int, n int) int {
+	best := -1
+	for i := 0; i < n; i++ {
+		if next[i] >= 0 && (best < 0 || next[i] < next[best]) {
+			best = i
 		}
 	}
+	return best
+}
+
+// ppNextStemPos returns the offset of the next occurrence of lit after pos, or
+// -1 when there is none.
+func ppNextStemPos(s string, pos int, lit string) int {
+	if j := strings.Index(s[pos+1:], lit); j >= 0 {
+		return pos + 1 + j
+	}
+	return -1
 }
 
 func ppIsLowerCyr(r rune) bool { return (r >= 'а' && r <= 'я') || r == 'ё' }
@@ -244,24 +276,33 @@ func ppPayloadValue(s string) (start, end int, ok bool) {
 	for start < end && (s[start] == ' ' || s[start] == '\t') {
 		start++
 	}
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t') {
-		end--
-	}
+	end = ppSkipTrailingSpace(s, end)
 	if end > start && s[end-1] == ')' {
-		open := -1
-		for i := end - 1; i >= start; i-- {
-			if s[i] == '(' {
-				open = i
-				break
-			}
-		}
-		if open >= start && end-1-open <= ppBareAsideBytes {
-			end = open
-			for end > start && (s[end-1] == ' ' || s[end-1] == '\t') {
-				end--
-			}
+		end = ppStripTrailingAside(s, start, end)
+	}
+	end = ppStripTrailingPunct(s, start, end)
+	return start, end, start < end
+}
+
+// ppStripTrailingAside removes ONE trailing parenthesised aside and the
+// whitespace before it, provided the aside is short enough to be a remark.
+func ppStripTrailingAside(s string, start, end int) int {
+	open := -1
+	for i := end - 1; i >= start; i-- {
+		if s[i] == '(' {
+			open = i
+			break
 		}
 	}
+	if open >= start && end-1-open <= ppBareAsideBytes {
+		end = ppSkipTrailingSpace(s, open)
+	}
+	return end
+}
+
+// ppStripTrailingPunct removes the sentence punctuation and whitespace at the
+// end of the payload.
+func ppStripTrailingPunct(s string, start, end int) int {
 	for end > start {
 		c := s[end-1]
 		if c == '.' || c == ',' || c == ';' || c == ':' || c == '!' || c == '?' ||
@@ -271,7 +312,7 @@ func ppPayloadValue(s string) (start, end int, ok bool) {
 		}
 		break
 	}
-	return start, end, start < end
+	return end
 }
 
 func ppDigitsExact(s string, i, n int) int {
@@ -364,53 +405,14 @@ func ppLeadSepRole(ctx *Context, from int) int {
 		switch t.Kind {
 		case text.KindSpace:
 			i++
-			continue
 		case text.KindPunct:
-			if t.In(ctx.Text) == ":" {
-				if words >= 1 && words <= 4 {
-					return t.End
-				}
-				return -1
+			if end, ok := ppRoleColon(ctx, t, words); ok {
+				return end
 			}
 			i++
-			continue
 		case text.KindWord:
-			w := t.In(ctx.Lower)
-			if _, ok := ppRoleGenitive[w]; ok {
-				words++
-				i++
-			} else if w == "доверенного" {
-				j := ppNextWordToken(ctx, i)
-				if j < 0 || ctx.Tokens[j].In(ctx.Lower) != "лица" {
-					return -1
-				}
-				words += 2
-				i = j + 1
-			} else if w == "по" {
-				j := ppNextWordToken(ctx, i)
-				if j < 0 {
-					return -1
-				}
-				nw := ctx.Tokens[j].In(ctx.Lower)
-				switch nw {
-				case "договору":
-					words += 2
-					i = j + 1
-					k := ppNextWordToken(ctx, j)
-					if k >= 0 && ctx.Tokens[k].In(ctx.Lower) == "страхования" {
-						words++
-						i = k + 1
-					}
-				case "кредиту", "вкладу":
-					words += 2
-					i = j + 1
-				default:
-					return -1
-				}
-			} else {
-				return -1
-			}
-			if words > 4 {
+			i = ppRoleWordAdvance(ctx, i, &words)
+			if i < 0 {
 				return -1
 			}
 		default:
@@ -418,6 +420,75 @@ func ppLeadSepRole(ctx *Context, from int) int {
 		}
 	}
 	return -1
+}
+
+// ppRoleColon returns the offset just past a colon that closes a role phrase of
+// between one and four words, or ok=false when the token is not such a colon.
+func ppRoleColon(ctx *Context, t text.Token, words int) (int, bool) {
+	if t.In(ctx.Text) != ":" {
+		return 0, false
+	}
+	if words >= 1 && words <= 4 {
+		return t.End, true
+	}
+	return 0, false
+}
+
+// ppRoleWordAdvance consumes one role word at token index i, updating the word
+// count, and returns the next token index, or -1 when the phrase is invalid.
+func ppRoleWordAdvance(ctx *Context, i int, words *int) int {
+	next, nw := ppRoleWord(ctx, i)
+	if next < 0 {
+		return -1
+	}
+	*words += nw
+	if *words > 4 {
+		return -1
+	}
+	return next
+}
+
+// ppRoleWord advances past one role word at token index i, returning the next
+// token index and the number of words consumed, or -1 when the word is not a
+// valid role phrase element.
+func ppRoleWord(ctx *Context, i int) (next, words int) {
+	t := ctx.Tokens[i]
+	w := t.In(ctx.Lower)
+	if _, ok := ppRoleGenitive[w]; ok {
+		return i + 1, 1
+	}
+	if w == "доверенного" {
+		j := ppNextWordToken(ctx, i)
+		if j < 0 || ctx.Tokens[j].In(ctx.Lower) != "лица" {
+			return -1, 0
+		}
+		return j + 1, 2
+	}
+	if w == "по" {
+		return ppRoleByPhrase(ctx, i)
+	}
+	return -1, 0
+}
+
+// ppRoleByPhrase advances past a "по ..." clarification at token index i.
+func ppRoleByPhrase(ctx *Context, i int) (int, int) {
+	j := ppNextWordToken(ctx, i)
+	if j < 0 {
+		return -1, 0
+	}
+	nw := ctx.Tokens[j].In(ctx.Lower)
+	switch nw {
+	case "договору":
+		k := ppNextWordToken(ctx, j)
+		if k >= 0 && ctx.Tokens[k].In(ctx.Lower) == "страхования" {
+			return k + 1, 3
+		}
+		return j + 1, 2
+	case "кредиту", "вкладу":
+		return j + 1, 2
+	default:
+		return -1, 0
+	}
 }
 
 // ppQuoteBefore reports whether the token immediately before pos is an opening
@@ -446,36 +517,39 @@ func ppQuotedLabelLeadSep(ctx *Context, start, end int) int {
 	if !ppQuoteBefore(ctx, start) {
 		return -1
 	}
-	i := ppTokenFrom(ctx, end)
-	for i < len(ctx.Tokens) && ctx.Tokens[i].Kind == text.KindSpace {
-		i++
-	}
-	if i >= len(ctx.Tokens) || ctx.Tokens[i].Kind != text.KindPunct {
+	i := ppNextNonSpace(ctx, ppTokenFrom(ctx, end))
+	if i < 0 || ctx.Tokens[i].Kind != text.KindPunct {
 		return -1
 	}
 	q := ctx.Tokens[i].In(ctx.Text)
 	if q != "»" && q != "\"" && q != "'" {
 		return -1
 	}
-	i++
-	for i < len(ctx.Tokens) && ctx.Tokens[i].Kind == text.KindSpace {
-		i++
-	}
-	if i >= len(ctx.Tokens) || ctx.Tokens[i].Kind != text.KindWord {
+	i = ppNextNonSpace(ctx, i+1)
+	if i < 0 || ctx.Tokens[i].Kind != text.KindWord {
 		return -1
 	}
 	w := ctx.Tokens[i].In(ctx.Lower)
 	if w != "указано" && w != "указан" && w != "указана" && w != "значится" {
 		return -1
 	}
-	i++
-	for i < len(ctx.Tokens) && ctx.Tokens[i].Kind == text.KindSpace {
-		i++
-	}
-	if i >= len(ctx.Tokens) || ctx.Tokens[i].Kind != text.KindPunct || ctx.Tokens[i].In(ctx.Text) != ":" {
+	i = ppNextNonSpace(ctx, i+1)
+	if i < 0 || ctx.Tokens[i].Kind != text.KindPunct || ctx.Tokens[i].In(ctx.Text) != ":" {
 		return -1
 	}
 	return ctx.Tokens[i].End
+}
+
+// ppNextNonSpace returns the index of the next non-space token at or after i,
+// or -1 when there is none.
+func ppNextNonSpace(ctx *Context, i int) int {
+	for i < len(ctx.Tokens) && ctx.Tokens[i].Kind == text.KindSpace {
+		i++
+	}
+	if i >= len(ctx.Tokens) {
+		return -1
+	}
+	return i
 }
 
 // ppWordAfter returns the lower-cased word that follows off, or "" when the
@@ -631,27 +705,32 @@ var (
 func ppTailSeriesLabel(s string, i int) (int, bool) {
 	r, sz := utf8.DecodeRuneInString(s[i:])
 	if r == 'и' || r == 'я' {
-		j := i + sz
-		if text.IsBoundary(s, j) {
-			return j, true
-		}
-		r2, sz2 := utf8.DecodeRuneInString(s[j:])
-		if r == 'и' && (r2 == 'я' || r2 == 'и' || r2 == 'ю') && text.IsBoundary(s, j+sz2) {
-			return j + sz2, true
-		}
-		if r == 'и' && r2 == 'е' {
-			k := j + sz2
-			r3, sz3 := utf8.DecodeRuneInString(s[k:])
-			if r3 == 'й' && text.IsBoundary(s, k+sz3) {
-				return k + sz3, true
-			}
-		}
-		return 0, false
+		return ppTailSeriesVowel(s, i+sz, r)
 	}
 	if i < len(s) && s[i] == '.' {
 		return i + 1, true
 	}
 	return i, text.IsBoundary(s, i)
+}
+
+// ppTailSeriesVowel completes the vowel-ending forms of "серия": "серии",
+// "серия", "серии" and "серие" (as in "серией"), rejecting "серийный".
+func ppTailSeriesVowel(s string, j int, r rune) (int, bool) {
+	if text.IsBoundary(s, j) {
+		return j, true
+	}
+	r2, sz2 := utf8.DecodeRuneInString(s[j:])
+	if r == 'и' && (r2 == 'я' || r2 == 'и' || r2 == 'ю') && text.IsBoundary(s, j+sz2) {
+		return j + sz2, true
+	}
+	if r == 'и' && r2 == 'е' {
+		k := j + sz2
+		r3, sz3 := utf8.DecodeRuneInString(s[k:])
+		if r3 == 'й' && text.IsBoundary(s, k+sz3) {
+			return k + sz3, true
+		}
+	}
+	return 0, false
 }
 
 // ppTailNumberWord accepts "номер" and its case forms up to two letters long —
@@ -728,14 +807,8 @@ var (
 func ppMatchLayout(s string, i int, l *ppDigitLayout) int {
 	for g := 0; g < len(l.groups); g++ {
 		if g > 0 {
-			j := ppSkipHorizSpace(s, i)
-			if g == len(l.groups)-1 && l.flexLast {
-				if j < len(s) {
-					if r, sz := utf8.DecodeRuneInString(s[j:]); ppIsNumberMark(r) {
-						j = ppSkipHorizSpace(s, j+sz)
-					}
-				}
-			} else if j == i {
+			j := ppLayoutSeparator(s, i, g == len(l.groups)-1 && l.flexLast)
+			if j < 0 {
 				return -1
 			}
 			i = j
@@ -749,6 +822,25 @@ func ppMatchLayout(s string, i int, l *ppDigitLayout) int {
 	return i
 }
 
+// ppLayoutSeparator returns the offset just past the separator before a group,
+// or -1 when the separator is missing. flexLast allows the separator before the
+// last group to be empty or a single number mark.
+func ppLayoutSeparator(s string, i int, flexLast bool) int {
+	j := ppSkipHorizSpace(s, i)
+	if flexLast {
+		if j < len(s) {
+			if r, sz := utf8.DecodeRuneInString(s[j:]); ppIsNumberMark(r) {
+				j = ppSkipHorizSpace(s, j+sz)
+			}
+		}
+		return j
+	}
+	if j == i {
+		return -1
+	}
+	return j
+}
+
 // ppBareGroupings are the whole-payload shapes of a passport series+number.
 // Unlike ppJoinedLayouts they demand a NON-EMPTY separator between every pair
 // of groups: the grouping is the only evidence there is, so "1234567890" — the
@@ -760,21 +852,9 @@ var ppBareGroupings = [][]uint8{{4, 6}, {2, 2, 6}}
 func ppMatchBare(s string, i int, groups []uint8) int {
 	for g := 0; g < len(groups); g++ {
 		if g > 0 {
-			j := ppSkipHorizSpace(s, i)
-			if j == i {
-				if j < len(s) {
-					if r, sz := utf8.DecodeRuneInString(s[j:]); ppIsNumberMark(r) {
-						j = ppSkipHorizSpace(s, j+sz)
-					} else {
-						return -1
-					}
-				} else {
-					return -1
-				}
-			} else if j < len(s) {
-				if r, sz := utf8.DecodeRuneInString(s[j:]); ppIsNumberMark(r) {
-					j = ppSkipHorizSpace(s, j+sz)
-				}
+			j := ppBareSeparator(s, i)
+			if j < 0 {
+				return -1
 			}
 			i = j
 		}
@@ -785,6 +865,27 @@ func ppMatchBare(s string, i int, groups []uint8) int {
 		i = e
 	}
 	return i
+}
+
+// ppBareSeparator returns the offset just past a NON-EMPTY separator before a
+// group: a run of spaces/tabs, or one number mark optionally padded. It returns
+// -1 when there is no separator at all.
+func ppBareSeparator(s string, i int) int {
+	j := ppSkipHorizSpace(s, i)
+	if j == i {
+		if j < len(s) {
+			if r, sz := utf8.DecodeRuneInString(s[j:]); ppIsNumberMark(r) {
+				return ppSkipHorizSpace(s, j+sz)
+			}
+		}
+		return -1
+	}
+	if j < len(s) {
+		if r, sz := utf8.DecodeRuneInString(s[j:]); ppIsNumberMark(r) {
+			j = ppSkipHorizSpace(s, j+sz)
+		}
+	}
+	return j
 }
 
 // ppGroupAdjacent reports a whitespace-separated digit group directly before
@@ -809,6 +910,15 @@ func (d passportDetector) numbers(ctx *Context, out []pd.Span) []pd.Span {
 	series := ppLabels(ctx, ppSeriesStems, ppSeriesLayouts, out[base:], false)
 	numbers := ppLabels(ctx, ppNumberStems, ppNumberLayouts, out[base:], true)
 
+	out = ppSeriesSpans(ctx, anchors, series, numbers, out)
+	out = ppNumberSpans(ctx, anchors, series, numbers, out)
+	out = ppBareSeriesNumber(ctx, out, base)
+	return d.corroborated(ctx, anchors, out, base)
+}
+
+// ppSeriesSpans emits a passport span for each series label that is paired with
+// a number or stands near a passport anchor.
+func ppSeriesSpans(ctx *Context, anchors []ppSpan, series, numbers []ppLabel, out []pd.Span) []pd.Span {
 	for _, s := range series {
 		if ppOtherDocumentLeft(ctx, anchors, s.digStart) {
 			continue
@@ -821,6 +931,12 @@ func (d passportDetector) numbers(ctx *Context, out []pd.Span) []pd.Span {
 			})
 		}
 	}
+	return out
+}
+
+// ppNumberSpans emits a passport span for each number label that is paired with
+// a series or stands near a passport anchor. A bare number label needs a pair.
+func ppNumberSpans(ctx *Context, anchors []ppSpan, series, numbers []ppLabel, out []pd.Span) []pd.Span {
 	for _, n := range numbers {
 		if ppOtherDocumentLeft(ctx, anchors, n.digStart) {
 			continue
@@ -836,18 +952,25 @@ func (d passportDetector) numbers(ctx *Context, out []pd.Span) []pd.Span {
 			})
 		}
 	}
-	if s, e, ok := ppPayloadValue(ctx.Text); ok && !ppOverlaps(out[base:], s, e) {
-		for _, g := range ppBareGroupings {
-			if ppMatchBare(ctx.Text, s, g) == e {
-				out = append(out, pd.Span{
-					Start: s, End: e, Type: pd.TypePassport,
-					Conf: ppConfBareValue, Src: detectorPassport, Hint: "bare_series_number",
-				})
-				break
-			}
+	return out
+}
+
+// ppBareSeriesNumber claims a whole-payload series+number written without any
+// label, provided no earlier span already covers it.
+func ppBareSeriesNumber(ctx *Context, out []pd.Span, base int) []pd.Span {
+	s, e, ok := ppPayloadValue(ctx.Text)
+	if !ok || ppOverlaps(out[base:], s, e) {
+		return out
+	}
+	for _, g := range ppBareGroupings {
+		if ppMatchBare(ctx.Text, s, g) == e {
+			return append(out, pd.Span{
+				Start: s, End: e, Type: pd.TypePassport,
+				Conf: ppConfBareValue, Src: detectorPassport, Hint: "bare_series_number",
+			})
 		}
 	}
-	return d.corroborated(ctx, anchors, out, base)
+	return out
 }
 
 func ppPairedAfter(numbers []ppLabel, seriesEnd int) bool {
@@ -890,6 +1013,26 @@ func ppPairedSeriesAfter(series []ppLabel, numberEnd int) bool {
 // nothing but a conjunction between them. One such group inside prose is an
 // order number (golden doc2-neg-03); two of them joined only by "и" is a list.
 func (d passportDetector) corroborated(ctx *Context, anchors []ppSpan, out []pd.Span, base int) []pd.Span {
+	groups := ppBareGroups(ctx)
+	for i := 1; i < len(groups); i++ {
+		prev, cur := groups[i-1], groups[i]
+		if !ppCorroboratePair(ctx, anchors, out, base, prev, cur) {
+			continue
+		}
+		out = append(out, pd.Span{
+			Start: prev.start, End: prev.end, Type: pd.TypePassport,
+			Conf: ppConfBareValue, Src: detectorPassport, Hint: "corroborated",
+		})
+		out = append(out, pd.Span{
+			Start: cur.start, End: cur.end, Type: pd.TypePassport,
+			Conf: ppConfBareValue, Src: detectorPassport, Hint: "corroborated",
+		})
+	}
+	return out
+}
+
+// ppBareGroups returns every bare series+number group in the payload, in order.
+func ppBareGroups(ctx *Context) []ppSpan {
 	lower := ctx.Lower
 	var groups []ppSpan
 	for i := 0; i < len(lower); i++ {
@@ -906,33 +1049,28 @@ func (d passportDetector) corroborated(ctx *Context, anchors []ppSpan, out []pd.
 			break
 		}
 	}
-	for i := 1; i < len(groups); i++ {
-		prev, cur := groups[i-1], groups[i]
-		if cur.start-prev.end > ppCorroborateGap {
-			continue
-		}
-		if !ppCorroborateGapOK(ctx, prev.end, cur.start) {
-			continue
-		}
-		if ppCorroborateNoise(ctx, prev.start) || ppCorroborateNoise(ctx, cur.start) {
-			continue
-		}
-		if ppOtherDocumentLeft(ctx, anchors, prev.start) || ppOtherDocumentLeft(ctx, anchors, cur.start) {
-			continue
-		}
-		if ppOverlaps(out[base:], prev.start, prev.end) || ppOverlaps(out[base:], cur.start, cur.end) {
-			continue
-		}
-		out = append(out, pd.Span{
-			Start: prev.start, End: prev.end, Type: pd.TypePassport,
-			Conf: ppConfBareValue, Src: detectorPassport, Hint: "corroborated",
-		})
-		out = append(out, pd.Span{
-			Start: cur.start, End: cur.end, Type: pd.TypePassport,
-			Conf: ppConfBareValue, Src: detectorPassport, Hint: "corroborated",
-		})
+	return groups
+}
+
+// ppCorroboratePair reports whether two adjacent bare groups stand close enough
+// and are not claimed by another span or a different document.
+func ppCorroboratePair(ctx *Context, anchors []ppSpan, out []pd.Span, base int, prev, cur ppSpan) bool {
+	if cur.start-prev.end > ppCorroborateGap {
+		return false
 	}
-	return out
+	if !ppCorroborateGapOK(ctx, prev.end, cur.start) {
+		return false
+	}
+	if ppCorroborateNoise(ctx, prev.start) || ppCorroborateNoise(ctx, cur.start) {
+		return false
+	}
+	if ppOtherDocumentLeft(ctx, anchors, prev.start) || ppOtherDocumentLeft(ctx, anchors, cur.start) {
+		return false
+	}
+	if ppOverlaps(out[base:], prev.start, prev.end) || ppOverlaps(out[base:], cur.start, cur.end) {
+		return false
+	}
+	return true
 }
 
 // ppCorroborateGapOK reports whether the bytes between two groups are only
@@ -940,29 +1078,36 @@ func (d passportDetector) corroborated(ctx *Context, anchors []ppSpan, out []pd.
 func ppCorroborateGapOK(ctx *Context, from, to int) bool {
 	conj := 0
 	for i := ppTokenFrom(ctx, from); i < len(ctx.Tokens) && ctx.Tokens[i].Start < to; i++ {
-		t := ctx.Tokens[i]
-		switch t.Kind {
-		case text.KindSpace:
-		case text.KindPunct:
-			switch t.In(ctx.Text) {
-			case ",", ";":
-			default:
-				return false
-			}
-		case text.KindWord:
-			w := t.In(ctx.Lower)
-			if w != "и" && w != "and" {
-				return false
-			}
-			conj++
-			if conj > 1 {
-				return false
-			}
-		default:
+		if !ppCorroborateGapToken(ctx, ctx.Tokens[i], &conj) {
 			return false
 		}
 	}
 	return true
+}
+
+// ppCorroborateGapToken reports whether one token is acceptable inside the gap
+// between two corroborating groups.
+func ppCorroborateGapToken(ctx *Context, t text.Token, conj *int) bool {
+	switch t.Kind {
+	case text.KindSpace:
+		return true
+	case text.KindPunct:
+		switch t.In(ctx.Text) {
+		case ",", ";":
+			return true
+		default:
+			return false
+		}
+	case text.KindWord:
+		w := t.In(ctx.Lower)
+		if w != "и" && w != "and" {
+			return false
+		}
+		*conj++
+		return *conj <= 1
+	default:
+		return false
+	}
 }
 
 // ppCorroborateNoise reports whether the word left of a group is a noise or
@@ -1011,40 +1156,17 @@ func (d passportDetector) joined(ctx *Context, anchors []ppSpan, out []pd.Span, 
 	lower := ctx.Lower
 	high := 0
 	for _, a := range anchors {
-		from, to := a.end, a.end+ppAnchorWindow+1
-		if from < high {
-			from = high
-		}
-		if to > len(lower) {
-			to = len(lower)
-		}
+		from, to := ppAnchorWindowBounds(a, high, len(lower))
 		for p := from; p < to; p++ {
-			if lower[p] < '0' || lower[p] > '9' || !text.IsBoundary(ctx.Text, p) {
+			if !ppIsDigitBoundary(lower, ctx.Text, p) {
 				continue
 			}
-			for li := range ppJoinedLayouts {
-				l := &ppJoinedLayouts[li]
-				e := ppMatchLayout(lower, p, l)
-				if e < 0 || !text.IsBoundary(ctx.Text, e) {
-					continue
-				}
-				if l.strictTail && ppGroupAdjacent(lower, p, e) {
-					break
-				}
-				if ppOverlaps(out[base:], p, e) || !ppAnchorNear(anchors, p, ppAnchorWindow) {
-					break
-				}
-				if ppOtherDocumentLeft(ctx, anchors, p) {
-					break
-				}
+			if e := ppJoinedMatch(ctx, anchors, out, base, lower, p); e > p {
 				out = append(out, pd.Span{
 					Start: p, End: e, Type: pd.TypePassport,
 					Conf: ppConfPassport, Src: detectorPassport, Hint: "series_number",
 				})
-				if e > p {
-					p = e - 1
-				}
-				break
+				p = e - 1
 			}
 		}
 		if to > high {
@@ -1052,6 +1174,47 @@ func (d passportDetector) joined(ctx *Context, anchors []ppSpan, out []pd.Span, 
 		}
 	}
 	return out
+}
+
+// ppAnchorWindowBounds returns the [from,to) byte window an anchor may scan for
+// a joined series+number, clamped to the already-scanned high watermark.
+func ppAnchorWindowBounds(a ppSpan, high, length int) (int, int) {
+	from, to := a.end, a.end+ppAnchorWindow+1
+	if from < high {
+		from = high
+	}
+	if to > length {
+		to = length
+	}
+	return from, to
+}
+
+// ppIsDigitBoundary reports whether byte p is a digit on a token boundary.
+func ppIsDigitBoundary(lower, s string, p int) bool {
+	return lower[p] >= '0' && lower[p] <= '9' && text.IsBoundary(s, p)
+}
+
+// ppJoinedMatch tries every joined layout at p and returns the end offset of
+// the first that fits, or -1 when none does.
+func ppJoinedMatch(ctx *Context, anchors []ppSpan, out []pd.Span, base int, lower string, p int) int {
+	for li := range ppJoinedLayouts {
+		l := &ppJoinedLayouts[li]
+		e := ppMatchLayout(lower, p, l)
+		if e < 0 || !text.IsBoundary(ctx.Text, e) {
+			continue
+		}
+		if l.strictTail && ppGroupAdjacent(lower, p, e) {
+			break
+		}
+		if ppOverlaps(out[base:], p, e) || !ppAnchorNear(anchors, p, ppAnchorWindow) {
+			break
+		}
+		if ppOtherDocumentLeft(ctx, anchors, p) {
+			break
+		}
+		return e
+	}
+	return -1
 }
 
 func ppLabels(ctx *Context, stems []ppStem, layouts []ppDigitLayout, taken []pd.Span, checkNoise bool) []ppLabel {
@@ -1279,14 +1442,23 @@ func ppAuthorityLeft(ctx *Context, pos int) bool {
 		if t.Kind != text.KindWord {
 			continue
 		}
-		w := t.In(ctx.Lower)
-		if ppIsStrongAuthority(w) {
+		if ppAuthorityWord(ctx, t) {
 			return true
 		}
-		if _, head := ppAuthorityHeads[w]; head {
-			if _, ok := ppAuthorityQualifiers[ppWordAfter(ctx, t.End)]; ok {
-				return true
-			}
+	}
+	return false
+}
+
+// ppAuthorityWord reports whether a word token names a passport-issuing body,
+// either outright or as a head followed by a qualifying word.
+func ppAuthorityWord(ctx *Context, t text.Token) bool {
+	w := t.In(ctx.Lower)
+	if ppIsStrongAuthority(w) {
+		return true
+	}
+	if _, head := ppAuthorityHeads[w]; head {
+		if _, ok := ppAuthorityQualifiers[ppWordAfter(ctx, t.End)]; ok {
+			return true
 		}
 	}
 	return false
@@ -1310,15 +1482,15 @@ var ppStrongAuthority = map[string]struct{}{
 // abbreviation. A head ALONE is never enough: "Отделение банка" is six of the
 // golden negatives, and none of them carries a qualifier.
 var ppAuthorityHeads = map[string]struct{}{
-	"отдел": {}, "отдела": {}, "отделом": {}, "отделе": {},
-	"отделение": {}, "отделения": {}, "отделением": {}, "отделении": {},
-	"управление": {}, "управления": {}, "управлением": {}, "управлении": {},
+	ppWordOtdel: {}, ppWordOtdela: {}, ppWordOtdelom: {}, "отделе": {},
+	ppWordOtdelenie: {}, ppWordOtdeleniya: {}, ppWordOtdeleniem: {}, "отделении": {},
+	ppWordUpravlenie: {}, ppWordUpravleniya: {}, ppWordUpravleniem: {}, "управлении": {},
 	"служба": {}, "службы": {}, "службой": {},
 }
 
 var ppAuthorityQualifiers = map[string]struct{}{
-	"полиции": {}, "милиции": {}, "внутренних": {}, "миграционной": {},
-	"миграционная": {}, "миграции": {}, "визовой": {}, "визовая": {},
+	"полиции": {}, "милиции": {}, "внутренних": {}, ppWordMigratsionnoy: {},
+	"миграционная": {}, "миграции": {}, ppWordVizovoy: {}, "визовая": {},
 	"уфмс": {}, "фмс": {}, "мвд": {}, "увд": {},
 }
 
@@ -1326,11 +1498,11 @@ var ppAuthorityQualifiers = map[string]struct{}{
 // triggered it: "Паспортно-визовая служба УВД Московского района". Verbs of
 // issuing are deliberately absent — "выдан" is a label, not part of the name.
 var ppIssuerPrefixWords = map[string]struct{}{
-	"отдел": {}, "отдела": {}, "отделом": {}, "отделение": {}, "отделения": {},
-	"отделением": {}, "управление": {}, "управления": {}, "управлением": {},
+	ppWordOtdel: {}, ppWordOtdela: {}, ppWordOtdelom: {}, ppWordOtdelenie: {}, ppWordOtdeleniya: {},
+	ppWordOtdeleniem: {}, ppWordUpravlenie: {}, ppWordUpravleniya: {}, ppWordUpravleniem: {},
 	"служба": {}, "службы": {}, "службой": {},
-	"паспортно": {}, "паспортный": {}, "паспортным": {}, "визовая": {}, "визовой": {},
-	"миграционной": {}, "миграционная": {}, "территориальный": {}, "территориальное": {},
+	"паспортно": {}, "паспортный": {}, "паспортным": {}, "визовая": {}, ppWordVizovoy: {},
+	ppWordMigratsionnoy: {}, "миграционная": {}, "территориальный": {}, "территориальное": {},
 	"главное": {}, "главного": {}, "межрайонный": {}, "межрайонное": {},
 	"районный": {}, "районное": {}, "городской": {}, "городское": {},
 	"областное": {}, "краевое": {}, "пункт": {}, "пункта": {},
@@ -1378,10 +1550,10 @@ func ppTailIssuingBody(s string, i int) (int, bool) {
 // ppTailIssuingOrgan completes "орган выдачи".
 func ppTailIssuingOrgan(s string, i int) (int, bool) {
 	j := ppSkipHorizSpace(s, i)
-	if j == i || !strings.HasPrefix(s[j:], "выдачи") {
+	if j == i || !strings.HasPrefix(s[j:], ppWordVydachi) {
 		return 0, false
 	}
-	return j + len("выдачи"), true
+	return j + len(ppWordVydachi), true
 }
 
 func (d passportDetector) issuer(ctx *Context, out []pd.Span) []pd.Span {
@@ -1439,32 +1611,43 @@ func ppIssuerExtendLeft(ctx *Context, start int) int {
 		if strings.ContainsAny(t.In(ctx.Text), "\n\r") {
 			break
 		}
-		switch t.Kind {
-		case text.KindSpace:
-			continue
-		case text.KindWord:
-			if _, ok := ppIssuerPrefixWords[t.In(ctx.Lower)]; !ok {
-				return start
-			}
-			start = t.Start
-		case text.KindPunct:
-			if t.In(ctx.Text) != "-" {
-				return start
-			}
-			prev := ppWordBefore(ctx, t.Start)
-			next := ppWordAfter(ctx, t.End)
-			if _, ok := ppIssuerPrefixWords[prev]; !ok {
-				return start
-			}
-			if _, ok := ppIssuerPrefixWords[next]; !ok {
-				return start
-			}
-			start = t.Start
-		default:
+		ns, stop := ppIssuerExtendToken(ctx, t, start)
+		if stop {
 			return start
 		}
+		start = ns
 	}
 	return start
+}
+
+// ppIssuerExtendToken advances the span start over one prefix token. stop=true
+// means the token is not a valid prefix and the walk must end at the current
+// start.
+func ppIssuerExtendToken(ctx *Context, t text.Token, start int) (int, bool) {
+	switch t.Kind {
+	case text.KindSpace:
+		return start, false
+	case text.KindWord:
+		if _, ok := ppIssuerPrefixWords[t.In(ctx.Lower)]; !ok {
+			return start, true
+		}
+		return t.Start, false
+	case text.KindPunct:
+		if t.In(ctx.Text) != "-" {
+			return start, true
+		}
+		prev := ppWordBefore(ctx, t.Start)
+		next := ppWordAfter(ctx, t.End)
+		if _, ok := ppIssuerPrefixWords[prev]; !ok {
+			return start, true
+		}
+		if _, ok := ppIssuerPrefixWords[next]; !ok {
+			return start, true
+		}
+		return t.Start, false
+	default:
+		return start, true
+	}
 }
 
 // unanchoredIssuer emits an issuer span for a payload that names the authority
@@ -1480,16 +1663,7 @@ func (d passportDetector) unanchoredIssuer(ctx *Context, out []pd.Span, base int
 		if t.Kind != text.KindWord {
 			continue
 		}
-		lw := t.In(lower)
-		trigger := ppIsStrongAuthority(lw)
-		if !trigger {
-			if _, head := ppAuthorityHeads[lw]; head {
-				if _, ok := ppAuthorityQualifiers[ppWordAfter(ctx, t.End)]; ok {
-					trigger = true
-				}
-			}
-		}
-		if !trigger {
+		if !ppIssuerTrigger(ctx, t) {
 			continue
 		}
 		s, e, ok := ppIssuerSpanMin(ctx, t.Start, 1)
@@ -1509,6 +1683,21 @@ func (d passportDetector) unanchoredIssuer(ctx *Context, out []pd.Span, base int
 		})
 	}
 	return out
+}
+
+// ppIssuerTrigger reports whether a word token names a passport-issuing body
+// and can therefore start an unanchored issuer span.
+func ppIssuerTrigger(ctx *Context, t text.Token) bool {
+	lw := t.In(ctx.Lower)
+	if ppIsStrongAuthority(lw) {
+		return true
+	}
+	if _, head := ppAuthorityHeads[lw]; head {
+		if _, ok := ppAuthorityQualifiers[ppWordAfter(ctx, t.End)]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // ppIssuerStoppedOnPredicate reports whether the span walk stopped on a
@@ -1535,71 +1724,99 @@ func ppIssuerSpan(ctx *Context, from int) (int, int, bool) {
 
 // ppIssuerSpanMin is ppIssuerSpan with the word floor spelled out: the
 // unanchored pass needs only one word, because the word itself is the evidence.
+// ppIssuerWalkState carries the mutable state of the issuer span walk.
+type ppIssuerWalkState struct {
+	end           int
+	lastWord      string
+	afterNumSign  bool
+	hasIssuerWord bool
+	words         int
+}
+
 func ppIssuerSpanMin(ctx *Context, from, minWords int) (int, int, bool) {
 	limit := from + ppIssuerMaxBytes
-	end := from
-	lastWord := ""
-	afterNumSign := false
-	hasIssuerWord := false
-	words := 0
-
-loop:
+	st := ppIssuerWalkState{end: from}
 	for i := ppTokenFrom(ctx, from); i < len(ctx.Tokens); i++ {
 		t := ctx.Tokens[i]
 		if t.End > limit {
 			break
 		}
-		switch t.Kind {
-		case text.KindSpace:
-			if strings.ContainsAny(t.In(ctx.Text), "\n\r") {
-				break loop
-			}
-		case text.KindWord, text.KindAlnum:
-			w := t.In(ctx.Lower)
-			if _, stop := ppIssuerStopWords[w]; stop {
-				break loop
-			}
-			if _, pred := ppIssuerPredicateWords[w]; pred {
-				break loop
-			}
-			if ppIsAuthorityWord(w) {
-				hasIssuerWord = true
-			}
-			lastWord = w
-			words++
-			end = t.End
-		case text.KindNumber:
-			// A bare number is a date or a code, i.e. the next field — unless it
-			// is the department number written as "№ 5".
-			if !afterNumSign {
-				break loop
-			}
-			end = t.End
-		case text.KindPunct:
-			switch t.In(ctx.Text) {
-			case ".":
-				if ppEndsSentence(lastWord) {
-					break loop
-				}
-				end = t.End
-			case "-", "–", "—", "/", "№", "\"", "«", "»":
-				end = t.End
-			default:
-				break loop
-			}
-		}
-		if t.Kind != text.KindSpace {
-			afterNumSign = t.Kind == text.KindPunct && t.In(ctx.Text) == "№"
+		if !ppIssuerWalkToken(ctx, t, &st) {
+			break
 		}
 	}
-	if !hasIssuerWord || words < minWords {
+	if !st.hasIssuerWord || st.words < minWords {
 		return 0, 0, false
 	}
-	s, e, ok := text.TrimSpanEdges(ctx.Text, from, end)
+	s, e, ok := text.TrimSpanEdges(ctx.Text, from, st.end)
 	if !ok {
 		return 0, 0, false
 	}
-	return s, ppRestoreClosingQuote(ctx.Text, s, e, end), true
+	return s, ppRestoreClosingQuote(ctx.Text, s, e, st.end), true
+}
+
+// ppIssuerWalkToken advances the issuer span walk over one token, returning
+// false when the walk must stop at the current end.
+func ppIssuerWalkToken(ctx *Context, t text.Token, st *ppIssuerWalkState) bool {
+	ok := true
+	switch t.Kind {
+	case text.KindSpace:
+		if strings.ContainsAny(t.In(ctx.Text), "\n\r") {
+			return false
+		}
+	case text.KindWord, text.KindAlnum:
+		ok = ppIssuerWalkWord(ctx, t, st)
+	case text.KindNumber:
+		// A bare number is a date or a code, i.e. the next field — unless it
+		// is the department number written as "№ 5".
+		if !st.afterNumSign {
+			return false
+		}
+		st.end = t.End
+	case text.KindPunct:
+		ok = ppIssuerWalkPunct(ctx, t, st)
+	}
+	if !ok {
+		return false
+	}
+	if t.Kind != text.KindSpace {
+		st.afterNumSign = t.Kind == text.KindPunct && t.In(ctx.Text) == "№"
+	}
+	return true
+}
+
+// ppIssuerWalkWord advances the walk over a word or alphanumeric token.
+func ppIssuerWalkWord(ctx *Context, t text.Token, st *ppIssuerWalkState) bool {
+	w := t.In(ctx.Lower)
+	if _, stop := ppIssuerStopWords[w]; stop {
+		return false
+	}
+	if _, pred := ppIssuerPredicateWords[w]; pred {
+		return false
+	}
+	if ppIsAuthorityWord(w) {
+		st.hasIssuerWord = true
+	}
+	st.lastWord = w
+	st.words++
+	st.end = t.End
+	return true
+}
+
+// ppIssuerWalkPunct advances the walk over a punctuation token.
+func ppIssuerWalkPunct(ctx *Context, t text.Token, st *ppIssuerWalkState) bool {
+	switch t.In(ctx.Text) {
+	case ".":
+		if ppEndsSentence(st.lastWord) {
+			return false
+		}
+		st.end = t.End
+	case "-", "–", "—", "/", "№", "\"", "«", "»":
+		st.end = t.End
+	default:
+		return false
+	}
+	return true
 }
 
 // ppRestoreClosingQuote re-attaches a single trailing closing quote or
@@ -1669,17 +1886,17 @@ var ppIssuerWords = map[string]struct{}{
 	"гу": {}, "ту": {}, "тп": {}, "мфц": {},
 	"мрэо": {}, "рэо": {}, "пвс": {}, "овир": {}, "гибдд": {},
 	"загс": {}, "загса": {}, "загсом": {},
-	"отдел": {}, "отдела": {}, "отделом": {}, "отделение": {}, "отделением": {},
-	"отделения": {}, "отделении": {}, "отделу": {},
-	"управление": {}, "управлением": {}, "управления": {}, "управлении": {},
-	"миграционной": {}, "миграционного": {}, "миграции": {},
+	ppWordOtdel: {}, ppWordOtdela: {}, ppWordOtdelom: {}, ppWordOtdelenie: {}, ppWordOtdeleniem: {},
+	ppWordOtdeleniya: {}, "отделении": {}, "отделу": {},
+	ppWordUpravlenie: {}, ppWordUpravleniem: {}, ppWordUpravleniya: {}, "управлении": {},
+	ppWordMigratsionnoy: {}, "миграционного": {}, "миграции": {},
 	"полиции": {}, "милиции": {}, "паспортный": {}, "паспортным": {},
-	"паспортно": {}, "визовой": {}, "консульство": {}, "консульством": {},
+	"паспортно": {}, ppWordVizovoy: {}, "консульство": {}, "консульством": {},
 	"посольство": {}, "посольством": {},
 }
 
 var ppIssuerStopWords = map[string]struct{}{
-	"дата": {}, "даты": {}, "дате": {}, "выдачи": {}, "код": {}, "кода": {},
+	"дата": {}, "даты": {}, "дате": {}, ppWordVydachi: {}, "код": {}, "кода": {},
 	"подразделения": {}, "зарегистрирован": {}, "зарегистрирована": {},
 	"проживает": {}, "проживающий": {}, "проживающая": {}, "адрес": {},
 	"паспорт": {}, "паспорта": {}, "серия": {}, "номер": {}, "снилс": {},
@@ -1696,9 +1913,9 @@ var ppIssuerGlue = map[string]struct{}{
 	"в": {}, "по": {}, "г": {}, "гор": {}, "им": {}, "имени": {}, "на": {},
 	"города": {}, "городе": {}, "район": {}, "района": {}, "районе": {},
 	"округ": {}, "округа": {}, "область": {}, "области": {},
-	"край": {}, "края": {}, "республика": {}, "республики": {},
+	"край": {}, "края": {}, ppWordRespublika: {}, ppWordRespubliki: {},
 	"выдан": {}, "выдана": {}, "выдано": {}, "выдал": {}, "выдала": {},
-	"выдали": {}, "выдавший": {}, "выдавшим": {}, "выдачи": {}, "кем": {},
+	"выдали": {}, "выдавший": {}, "выдавшим": {}, ppWordVydachi: {}, "кем": {},
 	"дата": {}, "код": {}, "подразделения": {},
 	"зарегистрирован": {}, "зарегистрирована": {}, "регистрации": {},
 }
@@ -1809,104 +2026,121 @@ func (d passportDetector) birthPlace(ctx *Context, out []pd.Span) []pd.Span {
 		return out
 	}
 	ppFindStems(ctx.Lower, ppBirthStems, func(_, start, end int) {
-		if !ppOnBoundaries(ctx.Text, start, end) {
-			return
-		}
-		if FamousMentionLeft(ctx, start) {
+		if !ppOnBoundaries(ctx.Text, start, end) || FamousMentionLeft(ctx, start) {
 			return
 		}
 		// Quoted-label form: «Место рождения» указано: <value>.
-		if q := ppQuotedLabelLeadSep(ctx, start, end); q >= 0 {
-			if s, e, ok := ppBirthPlaceSpan(ctx, q); ok {
-				out = append(out, pd.Span{
-					Start: s, End: e, Type: pd.TypeBirthPlace,
-					Conf: ppConfBirthPlace, Src: detectorPassport, Hint: "birth_place",
-				})
-				return
-			}
-		}
-		// Role-colon form: Место рождения поручителя: <value>.
-		if r := ppLeadSepRole(ctx, end); r >= 0 {
-			if s, e, ok := ppBirthPlaceSpan(ctx, r); ok {
-				out = append(out, pd.Span{
-					Start: s, End: e, Type: pd.TypeBirthPlace,
-					Conf: ppConfBirthPlace, Src: detectorPassport, Hint: "birth_place",
-				})
-				return
-			}
-		}
-		s, e, ok := ppBirthPlaceSpan(ctx, ppSkipLeadSep(ctx.Text, end))
-		if !ok {
+		if q := ppQuotedLabelLeadSep(ctx, start, end); q >= 0 && ppBirthPlaceEmit(ctx, &out, q) {
 			return
 		}
-		out = append(out, pd.Span{
-			Start: s, End: e, Type: pd.TypeBirthPlace,
-			Conf: ppConfBirthPlace, Src: detectorPassport, Hint: "birth_place",
-		})
+		// Role-colon form: Место рождения поручителя: <value>.
+		if r := ppLeadSepRole(ctx, end); r >= 0 && ppBirthPlaceEmit(ctx, &out, r) {
+			return
+		}
+		ppBirthPlaceEmit(ctx, &out, ppSkipLeadSep(ctx.Text, end))
 	})
 	return out
 }
 
+// ppBirthPlaceEmit appends a birth-place span starting at from, returning
+// whether a span was emitted.
+func ppBirthPlaceEmit(ctx *Context, out *[]pd.Span, from int) bool {
+	s, e, ok := ppBirthPlaceSpan(ctx, from)
+	if !ok {
+		return false
+	}
+	*out = append(*out, pd.Span{
+		Start: s, End: e, Type: pd.TypeBirthPlace,
+		Conf: ppConfBirthPlace, Src: detectorPassport, Hint: "birth_place",
+	})
+	return true
+}
+
+// ppBirthWalkState carries the mutable state of the birth-place span walk.
+type ppBirthWalkState struct {
+	end     int
+	tent    int
+	first   bool
+	pending bool
+}
+
 func ppBirthPlaceSpan(ctx *Context, from int) (int, int, bool) {
 	limit := from + ppBirthMaxBytes
-	end, tent := from, from
-	first := true
-	pending := false
-
-loop:
+	st := ppBirthWalkState{end: from, tent: from, first: true}
 	for i := ppTokenFrom(ctx, from); i < len(ctx.Tokens); i++ {
 		t := ctx.Tokens[i]
 		if t.End > limit {
 			break
 		}
-		switch t.Kind {
-		case text.KindSpace:
-			if strings.ContainsAny(t.In(ctx.Text), "\n\r") {
-				break loop
-			}
-		case text.KindWord:
-			lw := t.In(ctx.Lower)
-			_, locality := ppLocalityTypes[lw]
-			_, region := ppRegionWords[lw]
-			capitalised := text.IsUpperFirst(t.In(ctx.Text)) && !dict.IsStopWord(lw)
-			switch {
-			case locality || dict.IsStreetType(lw):
-			case capitalised || dict.IsCity(lw):
-			case !first && region:
-			default:
-				break loop
-			}
-			first = false
-			tent = t.End
-			switch {
-			case !pending:
-				end = tent
-			case region:
-				end, pending = tent, false
-			}
-		case text.KindPunct:
-			switch t.In(ctx.Text) {
-			case ".", "-", "–":
-				tent = t.End
-				if !pending {
-					end = tent
-				}
-			case ",":
-				if pending || first {
-					break loop
-				}
-				pending, tent = true, t.End
-			default:
-				break loop
-			}
-		default:
-			break loop
+		if !ppBirthWalkToken(ctx, t, &st) {
+			break
 		}
 	}
-	if first {
+	if st.first {
 		return 0, 0, false
 	}
-	return text.TrimSpanEdges(ctx.Text, from, end)
+	return text.TrimSpanEdges(ctx.Text, from, st.end)
+}
+
+// ppBirthWalkToken advances the birth-place span walk over one token, returning
+// false when the walk must stop at the current end.
+func ppBirthWalkToken(ctx *Context, t text.Token, st *ppBirthWalkState) bool {
+	switch t.Kind {
+	case text.KindSpace:
+		if strings.ContainsAny(t.In(ctx.Text), "\n\r") {
+			return false
+		}
+	case text.KindWord:
+		return ppBirthWalkWord(ctx, t, st)
+	case text.KindPunct:
+		return ppBirthWalkPunct(ctx, t, st)
+	default:
+		return false
+	}
+	return true
+}
+
+// ppBirthWalkWord advances the walk over a word token.
+func ppBirthWalkWord(ctx *Context, t text.Token, st *ppBirthWalkState) bool {
+	lw := t.In(ctx.Lower)
+	_, locality := ppLocalityTypes[lw]
+	_, region := ppRegionWords[lw]
+	capitalised := text.IsUpperFirst(t.In(ctx.Text)) && !dict.IsStopWord(lw)
+	switch {
+	case locality || dict.IsStreetType(lw):
+	case capitalised || dict.IsCity(lw):
+	case !st.first && region:
+	default:
+		return false
+	}
+	st.first = false
+	st.tent = t.End
+	switch {
+	case !st.pending:
+		st.end = st.tent
+	case region:
+		st.end, st.pending = st.tent, false
+	}
+	return true
+}
+
+// ppBirthWalkPunct advances the walk over a punctuation token.
+func ppBirthWalkPunct(ctx *Context, t text.Token, st *ppBirthWalkState) bool {
+	switch t.In(ctx.Text) {
+	case ".", "-", "–":
+		st.tent = t.End
+		if !st.pending {
+			st.end = st.tent
+		}
+	case ",":
+		if st.pending || st.first {
+			return false
+		}
+		st.pending, st.tent = true, t.End
+	default:
+		return false
+	}
+	return true
 }
 
 var ppLocalityTypes = map[string]struct{}{
@@ -1922,7 +2156,7 @@ var ppLocalityTypes = map[string]struct{}{
 var ppRegionWords = map[string]struct{}{
 	"область": {}, "области": {}, "обл": {}, "край": {}, "края": {}, "крае": {},
 	"район": {}, "района": {}, "районе": {}, "р-н": {}, "рн": {},
-	"республика": {}, "республики": {}, "республике": {}, "респ": {},
+	ppWordRespublika: {}, ppWordRespubliki: {}, "республике": {}, "респ": {},
 	"округ": {}, "округа": {}, "округе": {}, "ао": {}, "губернии": {},
 	"уезд": {}, "уезда": {}, "ссср": {}, "рсфср": {}, "рф": {}, "россии": {},
 	"федерации": {}, "россия": {}, "казахстан": {}, "казахстана": {},
@@ -1964,30 +2198,14 @@ func (d passportDetector) citizenship(ctx *Context, out []pd.Span) []pd.Span {
 			return
 		}
 		// Quoted-label form: «Гражданство» указано: <value>.
-		if q := ppQuotedLabelLeadSep(ctx, start, end); q >= 0 {
-			if s, e, ok := ppCitizenshipSpan(ctx, q); ok {
-				out = append(out, pd.Span{
-					Start: s, End: e, Type: pd.TypeCitizenship,
-					Conf: ppConfCitizenship, Src: detectorPassport, Hint: "citizenship",
-				})
-				return
-			}
+		if q := ppQuotedLabelLeadSep(ctx, start, end); q >= 0 && ppCitizenshipEmit(ctx, &out, q, "citizenship") {
+			return
 		}
 		// Role-colon form: Гражданство поручителя: <value>.
-		if r := ppLeadSepRole(ctx, end); r >= 0 {
-			if s, e, ok := ppCitizenshipSpan(ctx, r); ok {
-				out = append(out, pd.Span{
-					Start: s, End: e, Type: pd.TypeCitizenship,
-					Conf: ppConfCitizenship, Src: detectorPassport, Hint: "citizenship",
-				})
-				return
-			}
+		if r := ppLeadSepRole(ctx, end); r >= 0 && ppCitizenshipEmit(ctx, &out, r, "citizenship") {
+			return
 		}
-		if s, e, ok := ppCitizenshipSpan(ctx, ppSkipLeadSep(ctx.Text, end)); ok {
-			out = append(out, pd.Span{
-				Start: s, End: e, Type: pd.TypeCitizenship,
-				Conf: ppConfCitizenship, Src: detectorPassport, Hint: "citizenship",
-			})
+		if ppCitizenshipEmit(ctx, &out, ppSkipLeadSep(ctx.Text, end), "citizenship") {
 			return
 		}
 		if s, e, ok := ppCitizenshipAdjLeft(ctx, start); ok {
@@ -1998,6 +2216,20 @@ func (d passportDetector) citizenship(ctx *Context, out []pd.Span) []pd.Span {
 		}
 	})
 	return out
+}
+
+// ppCitizenshipEmit appends a citizenship span starting at from, returning
+// whether a span was emitted.
+func ppCitizenshipEmit(ctx *Context, out *[]pd.Span, from int, hint string) bool {
+	s, e, ok := ppCitizenshipSpan(ctx, from)
+	if !ok {
+		return false
+	}
+	*out = append(*out, pd.Span{
+		Start: s, End: e, Type: pd.TypeCitizenship,
+		Conf: ppConfCitizenship, Src: detectorPassport, Hint: hint,
+	})
+	return true
 }
 
 func ppCitizenshipAdjLeft(ctx *Context, off int) (int, int, bool) {
@@ -2021,44 +2253,51 @@ func ppCitizenshipSpan(ctx *Context, from int) (int, int, bool) {
 	limit := from + ppCitizenMaxBytes
 	end := from
 	words := 0
-
-loop:
 	for i := ppTokenFrom(ctx, from); i < len(ctx.Tokens); i++ {
 		t := ctx.Tokens[i]
 		if t.End > limit || words >= ppCitizenMaxWords {
 			break
 		}
-		switch t.Kind {
-		case text.KindSpace:
-			if strings.ContainsAny(t.In(ctx.Text), "\n\r") {
-				break loop
-			}
-		case text.KindWord:
-			lw := t.In(ctx.Lower)
-			_, value := ppCitizenshipValues[lw]
-			_, tail := ppCitizenshipTails[lw]
-			if words == 0 {
-				if !value && !dict.IsCitizenship(lw) && !dict.IsCountry(lw) {
-					break loop
-				}
-			} else if !value && !tail && !dict.IsCountry(lw) && !text.IsUpperFirst(t.In(ctx.Text)) {
-				break loop
-			}
-			words++
-			end = t.End
-		case text.KindPunct:
-			if t.In(ctx.Text) != "-" {
-				break loop
-			}
-			end = t.End
-		default:
-			break loop
+		if !ppCitizenshipWalkToken(ctx, t, &end, &words) {
+			break
 		}
 	}
 	if words == 0 {
 		return 0, 0, false
 	}
 	return text.TrimSpanEdges(ctx.Text, from, end)
+}
+
+// ppCitizenshipWalkToken advances the citizenship span walk over one token,
+// returning false when the walk must stop at the current end.
+func ppCitizenshipWalkToken(ctx *Context, t text.Token, end *int, words *int) bool {
+	switch t.Kind {
+	case text.KindSpace:
+		if strings.ContainsAny(t.In(ctx.Text), "\n\r") {
+			return false
+		}
+	case text.KindWord:
+		lw := t.In(ctx.Lower)
+		_, value := ppCitizenshipValues[lw]
+		_, tail := ppCitizenshipTails[lw]
+		if *words == 0 {
+			if !value && !dict.IsCitizenship(lw) && !dict.IsCountry(lw) {
+				return false
+			}
+		} else if !value && !tail && !dict.IsCountry(lw) && !text.IsUpperFirst(t.In(ctx.Text)) {
+			return false
+		}
+		(*words)++
+		*end = t.End
+	case text.KindPunct:
+		if t.In(ctx.Text) != "-" {
+			return false
+		}
+		*end = t.End
+	default:
+		return false
+	}
+	return true
 }
 
 var ppCitizenshipValues = map[string]struct{}{
@@ -2070,15 +2309,15 @@ var ppCitizenshipValues = map[string]struct{}{
 	"киргизия": {}, "киргизии": {}, "кыргызстан": {}, "кыргызстана": {},
 	"таджикистан": {}, "таджикистана": {}, "азербайджан": {}, "азербайджана": {},
 	"молдова": {}, "молдовы": {}, "грузия": {}, "грузии": {}, "туркменистан": {},
-	"туркменистана": {}, "республика": {}, "республики": {}, "сша": {},
+	"туркменистана": {}, ppWordRespublika: {}, ppWordRespubliki: {}, "сша": {},
 	"германия": {}, "германии": {}, "израиль": {}, "израиля": {}, "китай": {},
 	"китая": {}, "russia": {}, "russian": {}, "usa": {}, "belarus": {},
 	"kazakhstan": {}, "ukraine": {},
 }
 
 var ppCitizenshipTails = map[string]struct{}{
-	"федерация": {}, "федерации": {}, "федерацию": {}, "республика": {},
-	"республики": {}, "беларусь": {}, "беларуси": {}, "союз": {}, "союза": {},
+	"федерация": {}, "федерации": {}, "федерацию": {}, ppWordRespublika: {},
+	ppWordRespubliki: {}, "беларусь": {}, "беларуси": {}, "союз": {}, "союза": {},
 	"federation": {},
 }
 

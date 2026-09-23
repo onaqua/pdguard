@@ -40,30 +40,45 @@ func (t Token) In(s string) string { return s[t.Start:t.End] }
 // of Turkish/Greek/special cases) are left untouched — correctness of offsets
 // matters more than lowering an exotic character.
 func SafeLower(s string) string {
-	// Fast path: pure ASCII without uppercase needs no copy.
-	ascii, hasUpper := true, false
+	ascii, hasUpper := scanASCII(s)
+	if ascii {
+		if !hasUpper {
+			return s
+		}
+		return lowerASCII(s)
+	}
+	return lowerUnicode(s)
+}
+
+// scanASCII reports whether s is pure ASCII and whether it contains an
+// uppercase letter.
+func scanASCII(s string) (ascii, hasUpper bool) {
+	ascii = true
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		if c >= utf8.RuneSelf {
-			ascii = false
-			break
+			return false, false
 		}
 		if 'A' <= c && c <= 'Z' {
 			hasUpper = true
 		}
 	}
-	if ascii {
-		if !hasUpper {
-			return s
+	return ascii, hasUpper
+}
+
+// lowerASCII lower-cases a pure-ASCII string in place.
+func lowerASCII(s string) string {
+	b := []byte(s)
+	for i := range b {
+		if 'A' <= b[i] && b[i] <= 'Z' {
+			b[i] += 'a' - 'A'
 		}
-		b := []byte(s)
-		for i := range b {
-			if 'A' <= b[i] && b[i] <= 'Z' {
-				b[i] += 'a' - 'A'
-			}
-		}
-		return string(b)
 	}
+	return string(b)
+}
+
+// lowerUnicode lower-cases s rune by rune, keeping the byte length stable.
+func lowerUnicode(s string) string {
 	var sb strings.Builder
 	sb.Grow(len(s))
 	for _, r := range s {
@@ -90,38 +105,11 @@ func Tokenize(s string) []Token {
 		start := i
 		switch {
 		case unicode.IsSpace(r):
-			i += size
-			for i < len(s) {
-				r2, sz := utf8.DecodeRuneInString(s[i:])
-				if !unicode.IsSpace(r2) {
-					break
-				}
-				i += sz
-			}
+			i = skipSpaceRun(s, i+size)
 			toks = append(toks, Token{start, i, KindSpace})
 		case isWordRune(r):
-			hasLetter, hasDigit := unicode.IsLetter(r), unicode.IsDigit(r)
-			i += size
-			for i < len(s) {
-				r2, sz := utf8.DecodeRuneInString(s[i:])
-				if !isWordRune(r2) {
-					break
-				}
-				if unicode.IsLetter(r2) {
-					hasLetter = true
-				}
-				if unicode.IsDigit(r2) {
-					hasDigit = true
-				}
-				i += sz
-			}
-			kind := KindWord
-			switch {
-			case hasLetter && hasDigit:
-				kind = KindAlnum
-			case hasDigit:
-				kind = KindNumber
-			}
+			var kind TokenKind
+			i, kind = scanWordRun(s, i+size, r)
 			toks = append(toks, Token{start, i, kind})
 		default:
 			i += size
@@ -129,6 +117,44 @@ func Tokenize(s string) []Token {
 		}
 	}
 	return toks
+}
+
+// skipSpaceRun returns the offset just past the run of spaces starting at i.
+func skipSpaceRun(s string, i int) int {
+	for i < len(s) {
+		r2, sz := utf8.DecodeRuneInString(s[i:])
+		if !unicode.IsSpace(r2) {
+			break
+		}
+		i += sz
+	}
+	return i
+}
+
+// scanWordRun returns the offset just past the word starting at i and its kind.
+func scanWordRun(s string, i int, first rune) (int, TokenKind) {
+	hasLetter, hasDigit := unicode.IsLetter(first), unicode.IsDigit(first)
+	for i < len(s) {
+		r2, sz := utf8.DecodeRuneInString(s[i:])
+		if !isWordRune(r2) {
+			break
+		}
+		if unicode.IsLetter(r2) {
+			hasLetter = true
+		}
+		if unicode.IsDigit(r2) {
+			hasDigit = true
+		}
+		i += sz
+	}
+	kind := KindWord
+	switch {
+	case hasLetter && hasDigit:
+		kind = KindAlnum
+	case hasDigit:
+		kind = KindNumber
+	}
+	return i, kind
 }
 
 // IsCyrillicWord reports whether every letter in s is Cyrillic and s has at

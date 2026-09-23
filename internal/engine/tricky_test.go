@@ -155,104 +155,32 @@ func TestTrickyCorpus(t *testing.T) {
 	e, _ := newEngine(t)
 	ctx := context.Background()
 
-	var (
-		positives     int // reviewer-labelled positives, divergences excluded
-		positiveFull  int // of those, cases where every expected type was found
-		negatives     int // reviewer-labelled negatives, divergences excluded
-		negativeClean int // of those, cases that came back byte for byte
-		exactRestore  int // over every case, divergences included
-
-		missedByType = map[string]int{}
-		extraByType  = map[string]int{}
-		details      []string
-		divergent    []string
-	)
-
+	st := &trickyStats{
+		missedByType: map[string]int{},
+		extraByType:  map[string]int{},
+	}
 	for _, c := range cases {
-		// Forward step.
-		fwd, err := e.Process(ctx, "", c.ID, c.Text)
-		if err != nil {
-			t.Errorf("%s: forward step failed: %v", c.ID, err)
-			continue
-		}
-		// Reverse step: feed back the mask we just produced.
-		rev, err := e.Process(ctx, "", c.ID, fwd.Output)
-		if err != nil {
-			t.Errorf("%s: reverse step failed: %v", c.ID, err)
-			continue
-		}
-
-		// Restore is checked for every case, divergences included: whatever we
-		// decided to mask, we must be able to put back.
-		if rev.Output == c.Text {
-			exactRestore++
-		} else {
-			t.Errorf("%s: demasking is not byte exact\n  want %q\n  got  %q", c.ID, c.Text, rev.Output)
-		}
-
-		if reason, ok := knownDivergences[c.ID]; ok {
-			divergent = append(divergent, fmt.Sprintf("%s: masked=%v types=%v — %s",
-				c.ID, fwd.Output != c.Text, fwd.Types, reason))
-			continue
-		}
-
-		got := make(map[string]bool, len(fwd.Types))
-		for _, ty := range fwd.Types {
-			got[ty] = true
-		}
-
-		if len(c.ExpectTypes) == 0 {
-			// A negative case must leave the text alone. Every byte we change
-			// without cause is charged directly by the jury's span-based
-			// Levenshtein metric, so a false positive costs more than a miss.
-			negatives++
-			if fwd.Output == c.Text && len(fwd.Types) == 0 {
-				negativeClean++
-			} else {
-				details = append(details, fmt.Sprintf("false positive %s (%s): types=%v mask=%q",
-					c.ID, c.Note, fwd.Types, fwd.Output))
-				for _, ty := range fwd.Types {
-					extraByType[ty]++
-				}
-			}
-			continue
-		}
-
-		positives++
-		missing := make([]string, 0, len(c.ExpectTypes))
-		for _, want := range c.ExpectTypes {
-			if got[want] {
-				continue
-			}
-			missing = append(missing, want)
-			missedByType[want]++
-		}
-		if len(missing) == 0 {
-			positiveFull++
-		} else {
-			details = append(details, fmt.Sprintf("incomplete %s (%s): missing %v, got %v",
-				c.ID, c.Note, missing, fwd.Types))
-		}
+		scoreTrickyCase(t, e, ctx, c, st)
 	}
 
-	negClean := ratio(negativeClean, negatives)
-	posFull := ratio(positiveFull, positives)
-	restore := ratio(exactRestore, len(cases))
+	negClean := ratio(st.negativeClean, st.negatives)
+	posFull := ratio(st.positiveFull, st.positives)
+	restore := ratio(st.exactRestore, len(cases))
 
 	t.Log("=== reviewer corpus (testdata/tricky_cases.jsonl) ===")
 	t.Logf("cases            %d (%d positive, %d negative, %d divergent)",
-		len(cases), positives, negatives, len(divergent))
-	t.Logf("negatives clean  %.3f  (%d/%d untouched, floor %.2f)", negClean, negativeClean, negatives, minTrickyNegative)
-	t.Logf("positives full   %.3f  (%d/%d with every expected type, floor %.2f)", posFull, positiveFull, positives, minTrickyPositive)
-	t.Logf("exact restore    %.3f  (%d/%d byte identical, floor %.2f)", restore, exactRestore, len(cases), minTrickyRestore)
-	logCounts(t, "missed by type", missedByType)
-	logCounts(t, "extra by type ", extraByType)
-	for _, d := range details {
+		len(cases), st.positives, st.negatives, len(st.divergent))
+	t.Logf("negatives clean  %.3f  (%d/%d untouched, floor %.2f)", negClean, st.negativeClean, st.negatives, minTrickyNegative)
+	t.Logf("positives full   %.3f  (%d/%d with every expected type, floor %.2f)", posFull, st.positiveFull, st.positives, minTrickyPositive)
+	t.Logf("exact restore    %.3f  (%d/%d byte identical, floor %.2f)", restore, st.exactRestore, len(cases), minTrickyRestore)
+	logCounts(t, "missed by type", st.missedByType)
+	logCounts(t, "extra by type ", st.extraByType)
+	for _, d := range st.details {
 		t.Logf("case  %s", d)
 	}
-	t.Logf("known divergences (excluded from the ratios above): %d", len(divergent))
-	sort.Strings(divergent)
-	for _, d := range divergent {
+	t.Logf("known divergences (excluded from the ratios above): %d", len(st.divergent))
+	sort.Strings(st.divergent)
+	for _, d := range st.divergent {
 		t.Logf("diverge  %s", d)
 	}
 
@@ -264,5 +192,96 @@ func TestTrickyCorpus(t *testing.T) {
 	}
 	if restore < minTrickyRestore {
 		t.Errorf("exact restore %.3f, want %.2f", restore, minTrickyRestore)
+	}
+}
+
+// trickyStats accumulates the counters TestTrickyCorpus reports.
+type trickyStats struct {
+	positives     int // reviewer-labelled positives, divergences excluded
+	positiveFull  int // of those, cases where every expected type was found
+	negatives     int // reviewer-labelled negatives, divergences excluded
+	negativeClean int // of those, cases that came back byte for byte
+	exactRestore  int // over every case, divergences included
+
+	missedByType map[string]int
+	extraByType  map[string]int
+	details      []string
+	divergent    []string
+}
+
+// scoreTrickyCase runs one reviewer case through the engine and folds its
+// result into the running totals.
+func scoreTrickyCase(t *testing.T, e *Engine, ctx context.Context, c trickyCase, st *trickyStats) {
+	t.Helper()
+	// Forward step.
+	fwd, err := e.Process(ctx, "", c.ID, c.Text)
+	if err != nil {
+		t.Errorf("%s: forward step failed: %v", c.ID, err)
+		return
+	}
+	// Reverse step: feed back the mask we just produced.
+	rev, err := e.Process(ctx, "", c.ID, fwd.Output)
+	if err != nil {
+		t.Errorf("%s: reverse step failed: %v", c.ID, err)
+		return
+	}
+
+	// Restore is checked for every case, divergences included: whatever we
+	// decided to mask, we must be able to put back.
+	if rev.Output == c.Text {
+		st.exactRestore++
+	} else {
+		t.Errorf("%s: demasking is not byte exact\n  want %q\n  got  %q", c.ID, c.Text, rev.Output)
+	}
+
+	if reason, ok := knownDivergences[c.ID]; ok {
+		st.divergent = append(st.divergent, fmt.Sprintf("%s: masked=%v types=%v — %s",
+			c.ID, fwd.Output != c.Text, fwd.Types, reason))
+		return
+	}
+
+	got := make(map[string]bool, len(fwd.Types))
+	for _, ty := range fwd.Types {
+		got[ty] = true
+	}
+
+	if len(c.ExpectTypes) == 0 {
+		// A negative case must leave the text alone. Every byte we change
+		// without cause is charged directly by the jury's span-based
+		// Levenshtein metric, so a false positive costs more than a miss.
+		st.negatives++
+		if fwd.Output == c.Text && len(fwd.Types) == 0 {
+			st.negativeClean++
+		} else {
+			st.details = append(st.details, fmt.Sprintf("false positive %s (%s): types=%v mask=%q",
+				c.ID, c.Note, fwd.Types, fwd.Output))
+			for _, ty := range fwd.Types {
+				st.extraByType[ty]++
+			}
+		}
+		return
+	}
+
+	scoreTrickyPositive(t, c, got, fwd.Types, st)
+}
+
+// scoreTrickyPositive folds a positive case's all-or-nothing score into the
+// running totals.
+func scoreTrickyPositive(t *testing.T, c trickyCase, got map[string]bool, types []string, st *trickyStats) {
+	t.Helper()
+	st.positives++
+	missing := make([]string, 0, len(c.ExpectTypes))
+	for _, want := range c.ExpectTypes {
+		if got[want] {
+			continue
+		}
+		missing = append(missing, want)
+		st.missedByType[want]++
+	}
+	if len(missing) == 0 {
+		st.positiveFull++
+	} else {
+		st.details = append(st.details, fmt.Sprintf("incomplete %s (%s): missing %v, got %v",
+			c.ID, c.Note, missing, types))
 	}
 }

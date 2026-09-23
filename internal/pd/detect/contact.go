@@ -223,6 +223,24 @@ func contactScanEmails(s string, out []pd.Span) []pd.Span {
 // addressing is part of the local part, quotes and angle brackets are not in
 // the character set at all and therefore fall outside the span on their own.
 func contactEmailAround(s string, at int) (int, int, bool) {
+	start := contactEmailLocalStart(s, at)
+	if start == at || !text.IsBoundary(s, start) {
+		return 0, 0, false
+	}
+
+	end := contactEmailDomainEnd(s, at)
+	if !contactDomainOK(s[at+1:end]) || !text.IsBoundary(s, end) {
+		return 0, 0, false
+	}
+	if contactEmailExcluded(s[start:at], s[at+1:end]) {
+		return 0, 0, false
+	}
+	return start, end, true
+}
+
+// contactEmailLocalStart grows the local part leftwards from the '@' and drops
+// any leading punctuation, returning the first byte of the address.
+func contactEmailLocalStart(s string, at int) int {
 	start := at
 	for start > 0 && contactIsLocalByte(s[start-1]) {
 		start--
@@ -232,10 +250,12 @@ func contactEmailAround(s string, at int) (int, int, bool) {
 	for start < at && !contactIsAlnumASCII(s[start]) {
 		start++
 	}
-	if start == at || !text.IsBoundary(s, start) {
-		return 0, 0, false
-	}
+	return start
+}
 
+// contactEmailDomainEnd grows the domain rightwards from the '@' and trims any
+// trailing dot or hyphen, returning one past the last byte of the address.
+func contactEmailDomainEnd(s string, at int) int {
 	end := at + 1
 	for end < len(s) {
 		c := s[end]
@@ -254,13 +274,7 @@ func contactEmailAround(s string, at int) (int, int, bool) {
 	for end > at+1 && (s[end-1] == '.' || s[end-1] == '-') {
 		end--
 	}
-	if !contactDomainOK(s[at+1:end]) || !text.IsBoundary(s, end) {
-		return 0, 0, false
-	}
-	if contactEmailExcluded(s[start:at], s[at+1:end]) {
-		return 0, 0, false
-	}
-	return start, end, true
+	return end
 }
 
 // contactDomainOK validates the domain half: every label non-empty, and a
@@ -272,6 +286,14 @@ func contactDomainOK(d string) bool {
 	if dot <= 0 || dot == len(d)-1 {
 		return false
 	}
+	if !contactLabelsOK(d) {
+		return false
+	}
+	return contactTLDOK(d[dot+1:])
+}
+
+// contactLabelsOK reports whether every dot-separated label of d is non-empty.
+func contactLabelsOK(d string) bool {
 	prev := -1
 	for i := 0; i <= len(d); i++ {
 		if i == len(d) || d[i] == '.' {
@@ -281,7 +303,13 @@ func contactDomainOK(d string) bool {
 			prev = i
 		}
 	}
-	tld, n := d[dot+1:], 0
+	return true
+}
+
+// contactTLDOK reports whether the top-level label is at least two letters,
+// counting Cyrillic letters as well as ASCII ones.
+func contactTLDOK(tld string) bool {
+	n := 0
 	for i := 0; i < len(tld); {
 		if contactIsASCIILetter(tld[i]) {
 			i++
@@ -343,38 +371,54 @@ func contactScanPhones(s string, out []pd.Span) []pd.Span {
 			continue
 		}
 		i = r.end
-		contactDropExportSuffix(s, &r)
-		start, conf, hint, needAnchor, ok := contactClassify(s, r)
-		if !ok {
+		var accepted bool
+		out, accepted = contactScanPhoneRun(s, r, emails, out)
+		if !accepted {
 			continue
 		}
-		if !contactBoundsOK(s, r) || contactOverlaps(out[:emails], start, r.end) {
-			continue
-		}
-		var buf [contactPhoneMaxDigits + 1]byte
-		n := 0
-		for p := r.firstDigit; p < r.end; p++ {
-			if contactIsDigit(s[p]) {
-				buf[n] = s[p]
-				n++
-			}
-		}
-		if contactPhoneExcluded(buf[:n]) {
-			continue
-		}
-		if needAnchor && !contactHasAnchorLeft(s, start) {
-			continue
-		}
-		if out == nil {
-			out = make([]pd.Span, 0, contactSpanCap)
-		}
-		out = append(out, pd.Span{
-			Start: start, End: r.end,
-			Type: pd.TypePhone, Conf: conf,
-			Src: "contact", Hint: hint,
-		})
 	}
 	return out
+}
+
+// contactScanPhoneRun judges one telephone run and, when it is a real number,
+// appends its span to out. It reports whether the run was accepted.
+func contactScanPhoneRun(s string, r contactRun, emails int, out []pd.Span) ([]pd.Span, bool) {
+	contactDropExportSuffix(s, &r)
+	start, conf, hint, needAnchor, ok := contactClassify(s, r)
+	if !ok {
+		return out, false
+	}
+	if !contactBoundsOK(s, r) || contactOverlaps(out[:emails], start, r.end) {
+		return out, false
+	}
+	if contactPhoneExcluded(contactDigits(s, r)) {
+		return out, false
+	}
+	if needAnchor && !contactHasAnchorLeft(s, start) {
+		return out, false
+	}
+	if out == nil {
+		out = make([]pd.Span, 0, contactSpanCap)
+	}
+	out = append(out, pd.Span{
+		Start: start, End: r.end,
+		Type: pd.TypePhone, Conf: conf,
+		Src: "contact", Hint: hint,
+	})
+	return out, true
+}
+
+// contactDigits copies the digits of a run into a stack buffer.
+func contactDigits(s string, r contactRun) []byte {
+	var buf [contactPhoneMaxDigits + 1]byte
+	n := 0
+	for p := r.firstDigit; p < r.end; p++ {
+		if contactIsDigit(s[p]) {
+			buf[n] = s[p]
+			n++
+		}
+	}
+	return buf[:n]
 }
 
 // contactRunAt collects the telephone-shaped run beginning at i. It reports
@@ -388,19 +432,7 @@ func contactRunAt(s string, i int) (contactRun, bool) {
 	}
 	for j < len(s) {
 		if contactIsDigit(s[j]) {
-			g := j
-			for j < len(s) && contactIsDigit(s[j]) {
-				j++
-			}
-			if r.firstDigit < 0 {
-				r.firstDigit = g
-			}
-			if r.nGroups < len(r.groups) {
-				r.groups[r.nGroups] = j - g
-			}
-			r.nGroups++
-			r.digits += j - g
-			r.end = j
+			j = contactRunDigit(s, &r, j)
 			continue
 		}
 		next, dot, ok := contactSepRun(s, j)
@@ -411,6 +443,25 @@ func contactRunAt(s string, i int) (contactRun, bool) {
 		j = next
 	}
 	return r, r.firstDigit >= 0
+}
+
+// contactRunDigit consumes the digit group beginning at j, records it in r and
+// returns the offset just past the group.
+func contactRunDigit(s string, r *contactRun, j int) int {
+	g := j
+	for j < len(s) && contactIsDigit(s[j]) {
+		j++
+	}
+	if r.firstDigit < 0 {
+		r.firstDigit = g
+	}
+	if r.nGroups < len(r.groups) {
+		r.groups[r.nGroups] = j - g
+	}
+	r.nGroups++
+	r.digits += j - g
+	r.end = j
+	return j
 }
 
 // contactSepRun consumes the separators at i and returns where the next digit

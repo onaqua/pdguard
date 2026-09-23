@@ -224,6 +224,10 @@ type docRule struct {
 	maxLit int
 }
 
+// docHintSeriesNumber is the hint shared by every rule whose shape is a series
+// followed by a number. It is a constant so the literal is not duplicated.
+const docHintSeriesNumber = "series+number"
+
 // docRules is the whole rule set, evaluated in order. Rules are pure data and
 // the functions they hold are stateless, so the slice is safe to share across
 // concurrent requests.
@@ -234,7 +238,7 @@ var docRules = []docRule{
 		minRun: 2, minGroup: 11,
 	},
 	{
-		typ: pd.TypeDriverLicense, re: reDocDriverLicense, hint: "series+number",
+		typ: pd.TypeDriverLicense, re: reDocDriverLicense, hint: docHintSeriesNumber,
 		anchors: docAnchorsDriverLicense, mustAnchor: true,
 		// minGroup is 6, not 10: a label between the series and the number ends
 		// the digit group, so "77 12 № 345678" offers no group longer than the
@@ -257,7 +261,7 @@ var docRules = []docRule{
 		score:  docScoreAnchored,
 	},
 	{
-		typ: pd.TypeForeignPassport, re: reDocForeignPassport, hint: "series+number",
+		typ: pd.TypeForeignPassport, re: reDocForeignPassport, hint: docHintSeriesNumber,
 		anchors: docAnchorsForeignPassport, mustAnchor: true,
 		// minGroup drops to 7 for the same reason it does for the licence: a
 		// label standing between the series and the number ends the digit group.
@@ -265,12 +269,12 @@ var docRules = []docRule{
 		verify: docNumberContextOK, score: docScoreAnchored,
 	},
 	{
-		typ: pd.TypeBirthCertificate, re: reDocBirthCertificate, hint: "series+number",
+		typ: pd.TypeBirthCertificate, re: reDocBirthCertificate, hint: docHintSeriesNumber,
 		anchors: docAnchorsBirthCertificate, score: docScoreBirthCertificate,
 		minRun: 6, minGroup: 6, needRomanDash: true,
 	},
 	{
-		typ: pd.TypeMilitaryID, re: reDocMilitaryID, hint: "series+number",
+		typ: pd.TypeMilitaryID, re: reDocMilitaryID, hint: docHintSeriesNumber,
 		anchors: docAnchorsMilitaryID, mustAnchor: true,
 		minRun: 7, minGroup: 7,
 		verify: docCyrillicSeriesOK, score: docScoreAnchored,
@@ -347,42 +351,7 @@ func (docsDetector) Detect(ctx *Context) []pd.Span {
 		}
 
 		accept := func(start, end int) bool {
-			if !text.IsBoundary(lower, start) || !text.IsBoundary(lower, end) {
-				return false
-			}
-			anchorEnd, anchored := docAnchorLeft(lower, start, r.anchors)
-			if r.mustAnchor && !anchored {
-				return false
-			}
-			if r.verify != nil && !r.verify(ctx, anchorEnd, start, end) {
-				return false
-			}
-			conf, ok := r.score(lower[start:end], anchored)
-			if !ok {
-				return false
-			}
-			// A label word caught between the two halves of the value is not
-			// personal data and must survive byte for byte: the quality metric
-			// is a span-Levenshtein distance to a reference mask, and starring
-			// out the letters of "номер" is the same kind of loss as missing a
-			// digit. The value is therefore reported as the two digit groups it
-			// really is — the same split the passport detector makes for
-			// "серия 4509 номер 123456".
-			if ls, le, split := docInnerLabel(lower, start, end); split {
-				a, b, okA := text.TrimSpanEdges(lower, start, ls)
-				c, d, okB := text.TrimSpanEdges(lower, le, end)
-				if okA && okB {
-					out = append(out,
-						pd.Span{Start: a, End: b, Type: r.typ, Conf: conf, Src: "docs", Hint: r.hint},
-						pd.Span{Start: c, End: d, Type: r.typ, Conf: conf, Src: "docs", Hint: r.hint})
-					return true
-				}
-			}
-			out = append(out, pd.Span{
-				Start: start, End: end,
-				Type: r.typ, Conf: conf, Src: "docs", Hint: r.hint,
-			})
-			return true
+			return docAccept(ctx, r, lower, &out, start, end)
 		}
 
 		if r.mustAnchor {
@@ -400,6 +369,47 @@ func (docsDetector) Detect(ctx *Context) []pd.Span {
 	return out
 }
 
+// docAccept validates one candidate against the rule's evidence and appends the
+// resulting span (or the two halves of a split value) to out.
+func docAccept(ctx *Context, r *docRule, lower string, out *[]pd.Span, start, end int) bool {
+	if !text.IsBoundary(lower, start) || !text.IsBoundary(lower, end) {
+		return false
+	}
+	anchorEnd, anchored := docAnchorLeft(lower, start, r.anchors)
+	if r.mustAnchor && !anchored {
+		return false
+	}
+	if r.verify != nil && !r.verify(ctx, anchorEnd, start, end) {
+		return false
+	}
+	conf, ok := r.score(lower[start:end], anchored)
+	if !ok {
+		return false
+	}
+	// A label word caught between the two halves of the value is not
+	// personal data and must survive byte for byte: the quality metric
+	// is a span-Levenshtein distance to a reference mask, and starring
+	// out the letters of "номер" is the same kind of loss as missing a
+	// digit. The value is therefore reported as the two digit groups it
+	// really is — the same split the passport detector makes for
+	// "серия 4509 номер 123456".
+	if ls, le, split := docInnerLabel(lower, start, end); split {
+		a, b, okA := text.TrimSpanEdges(lower, start, ls)
+		c, d, okB := text.TrimSpanEdges(lower, le, end)
+		if okA && okB {
+			*out = append(*out,
+				pd.Span{Start: a, End: b, Type: r.typ, Conf: conf, Src: "docs", Hint: r.hint},
+				pd.Span{Start: c, End: d, Type: r.typ, Conf: conf, Src: "docs", Hint: r.hint})
+			return true
+		}
+	}
+	*out = append(*out, pd.Span{
+		Start: start, End: end,
+		Type: r.typ, Conf: conf, Src: "docs", Hint: r.hint,
+	})
+	return true
+}
+
 // docScanKeys reduces a cue list to the shortest set of prefixes that still
 // finds every occurrence, and reports the longest cue in the list — the reach a
 // window has to allow for past the prefix that opened it.
@@ -414,27 +424,30 @@ func docScanKeys(anchors []docAnchor) ([]string, int) {
 	}
 	keys := make([]string, 0, len(raw))
 	for i, k := range raw {
-		covered := false
-		for j, other := range raw {
-			if j == i {
-				continue
-			}
-			// A shorter prefix already finds everything this one would; on a
-			// tie the earlier entry wins, so exactly one survives.
-			if len(other) < len(k) && strings.HasPrefix(k, other) {
-				covered = true
-				break
-			}
-			if other == k && j < i {
-				covered = true
-				break
-			}
-		}
-		if !covered {
+		if !docKeyCovered(raw, i, k) {
 			keys = append(keys, k)
 		}
 	}
 	return keys, maxLit
+}
+
+// docKeyCovered reports whether the key at i is already found by an earlier or
+// shorter key, in which case it must not survive on its own.
+func docKeyCovered(raw []string, i int, k string) bool {
+	for j, other := range raw {
+		if j == i {
+			continue
+		}
+		// A shorter prefix already finds everything this one would; on a
+		// tie the earlier entry wins, so exactly one survives.
+		if len(other) < len(k) && strings.HasPrefix(k, other) {
+			return true
+		}
+		if other == k && j < i {
+			return true
+		}
+	}
+	return false
 }
 
 // docRunePrefix truncates s to at most n bytes without splitting a rune.
@@ -472,29 +485,43 @@ func docScanProfile(s string) docProfile {
 		c := s[i]
 		switch {
 		case c >= '0' && c <= '9':
-			run++
-			group++
-			if run > p.maxRun {
-				p.maxRun = run
-			}
-			if group > p.maxGroup {
-				p.maxGroup = group
-			}
+			run, group = docProfileDigit(&p, run, group)
 		case c == ' ' || c == '-':
-			if c == '-' && i > 0 && docIsRomanByte(s[i-1]) {
-				p.romanDash = true
-			}
-			run = 0
-			// The group survives only a separator that actually stands BETWEEN
-			// two digits; anything else ends it.
-			if !(i > 0 && docIsDigitByte(s[i-1]) && i+1 < len(s) && docIsDigitByte(s[i+1])) {
-				group = 0
-			}
+			run, group = docProfileSep(s, i, &p, run, group)
 		default:
 			run, group = 0, 0
 		}
 	}
 	return p
+}
+
+// docProfileDigit folds one digit into the running run and group, widening the
+// profile maxima when they grow.
+func docProfileDigit(p *docProfile, run, group int) (int, int) {
+	run++
+	group++
+	if run > p.maxRun {
+		p.maxRun = run
+	}
+	if group > p.maxGroup {
+		p.maxGroup = group
+	}
+	return run, group
+}
+
+// docProfileSep handles a space or dash separator: it may mark a Roman-dash
+// birth certificate and may let the digit group survive.
+func docProfileSep(s string, i int, p *docProfile, run, group int) (int, int) {
+	if c := s[i]; c == '-' && i > 0 && docIsRomanByte(s[i-1]) {
+		p.romanDash = true
+	}
+	run = 0
+	// The group survives only a separator that actually stands BETWEEN
+	// two digits; anything else ends it.
+	if !(i > 0 && docIsDigitByte(s[i-1]) && i+1 < len(s) && docIsDigitByte(s[i+1])) {
+		group = 0
+	}
+	return run, group
 }
 
 func docIsDigitByte(c byte) bool { return c >= '0' && c <= '9' }
@@ -607,23 +634,12 @@ func docForEachWindow(s string, keys []string, maxLit int, fn func(from, to int)
 	}
 	high := 0
 	for {
-		best := -1
-		for i := 0; i < n; i++ {
-			if next[i] >= 0 && (best < 0 || next[i] < next[best]) {
-				best = i
-			}
-		}
+		best := docNextBest(next, n)
 		if best < 0 {
 			return
 		}
 		pos, lit := next[best], keys[best]
-		from, to := pos, pos+maxLit+docAnchorWindow+1
-		if from < high {
-			from = high
-		}
-		if to > len(s) {
-			to = len(s)
-		}
+		from, to := docWindowBounds(pos, maxLit, len(s), high)
 		if from < to {
 			fn(from, to)
 			high = to
@@ -634,6 +650,31 @@ func docForEachWindow(s string, keys []string, maxLit int, fn func(from, to int)
 			next[best] = -1
 		}
 	}
+}
+
+// docNextBest returns the index of the earliest next occurrence among the scan
+// keys, or -1 when none remains.
+func docNextBest(next [docMaxAnchors]int, n int) int {
+	best := -1
+	for i := 0; i < n; i++ {
+		if next[i] >= 0 && (best < 0 || next[i] < next[best]) {
+			best = i
+		}
+	}
+	return best
+}
+
+// docWindowBounds clips the scan window for one key occurrence to the bytes not
+// yet offered and to the payload length.
+func docWindowBounds(pos, maxLit, sLen, high int) (int, int) {
+	from, to := pos, pos+maxLit+docAnchorWindow+1
+	if from < high {
+		from = high
+	}
+	if to > sLen {
+		to = sLen
+	}
+	return from, to
 }
 
 // docAnchorLeft returns where the NEAREST cue word ends within docAnchorWindow
@@ -652,21 +693,28 @@ func docAnchorLeft(s string, before int, anchors []docAnchor) (int, bool) {
 	win := s[from:before]
 	best := -1
 	for _, a := range anchors {
-		for off := 0; off < len(win); {
-			i := strings.Index(win[off:], a.s)
-			if i < 0 {
-				break
-			}
-			abs := from + off + i
-			if text.IsBoundary(s, abs) && (!a.exact || text.IsBoundary(s, abs+len(a.s))) {
-				if end := abs + len(a.s); end > best {
-					best = end
-				}
-			}
-			off += i + 1
-		}
+		best = docAnchorScan(s, win, from, a, best)
 	}
 	return best, best >= 0
+}
+
+// docAnchorScan finds every occurrence of one cue inside the window and keeps
+// the nearest accepted end offset.
+func docAnchorScan(s, win string, from int, a docAnchor, best int) int {
+	for off := 0; off < len(win); {
+		i := strings.Index(win[off:], a.s)
+		if i < 0 {
+			break
+		}
+		abs := from + off + i
+		if text.IsBoundary(s, abs) && (!a.exact || text.IsBoundary(s, abs+len(a.s))) {
+			if end := abs + len(a.s); end > best {
+				best = end
+			}
+		}
+		off += i + 1
+	}
+	return best
 }
 
 // docScoreAnchored is the score function for shapes that are meaningless

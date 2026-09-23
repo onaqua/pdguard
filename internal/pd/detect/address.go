@@ -255,9 +255,21 @@ var addrLocativePreps = map[string]struct{}{
 	"близ": {}, "около": {}, "вблизи": {},
 }
 
+// Address anchor phrases shared by the residence, anchor and personal lists.
+// They are kept as constants so the same literal is not duplicated across the
+// three slices below.
+const (
+	addrPhraseProzhivaet   = "проживает"
+	addrPhraseProzhivayush = "проживающ"
+	addrPhrasePropisan     = "прописан"
+	addrPhraseMesto        = "место жительства"
+	addrPhraseMesta        = "места жительства"
+	addrPhraseMestu        = "месту жительства"
+)
+
 var addrResidenceAnchors = []string{
-	"проживает", "проживаю", "проживающ", "прописан",
-	"место жительства", "места жительства", "месту жительства",
+	addrPhraseProzhivaet, "проживаю", addrPhraseProzhivayush, addrPhrasePropisan,
+	addrPhraseMesto, addrPhraseMesta, addrPhraseMestu,
 }
 
 var addrNameConnectors = map[string]struct{}{
@@ -270,8 +282,8 @@ var addrNameConnectors = map[string]struct{}{
 }
 
 var addrAnchors = []string{
-	"адрес", "проживает", "проживающ", "прописан", "зарегистрирован",
-	"регистраци", "место жительства", "места жительства", "месту жительства",
+	"адрес", addrPhraseProzhivaet, addrPhraseProzhivayush, addrPhrasePropisan, "зарегистрирован",
+	"регистраци", addrPhraseMesto, addrPhraseMesta, addrPhraseMestu,
 	"доставка", "доставки", "доставить по", "куда", "address", "индекс",
 }
 
@@ -282,8 +294,8 @@ var addrAnchors = []string{
 // address win the comparison and get masked, which is exactly the negative
 // example the specification calls out.
 var addrPersonalAnchors = []string{
-	"проживает", "проживающ", "прописан", "зарегистрирован",
-	"регистраци", "место жительства", "места жительства", "месту жительства",
+	addrPhraseProzhivaet, addrPhraseProzhivayush, addrPhrasePropisan, "зарегистрирован",
+	"регистраци", addrPhraseMesto, addrPhraseMesta, addrPhraseMestu,
 	"доставка", "доставки", "доставить по", "куда",
 }
 
@@ -378,39 +390,57 @@ func (d addressDetector) Detect(ctx *Context) []pd.Span {
 	sort.SliceStable(kept, func(i, j int) bool { return kept[i].span.Start < kept[j].span.Start })
 
 	out := make([]pd.Span, 0, len(kept)+1)
-	for idx, c := range kept {
-		if !ctx.Enabled(c.span.Type) {
-			continue
+	for idx := range kept {
+		if s, ok := addrEmitCandidate(ctx, kept, idx); ok {
+			out = append(out, s)
 		}
-		anchored := addrLastPhrase(ctx.Lower, c.span.Start-addrAnchorWindow, c.span.Start, addrAnchors) >= 0
-		neighbour := false
-		if c.needsNeighbour || !anchored {
-			neighbour = addrHasNeighbour(kept, idx)
-		}
-		if c.needsNeighbour && !neighbour && c.residenceOK {
-			if addrLastPhrase(ctx.Lower, c.span.Start-addrAnchorWindow, c.span.Start, addrResidenceAnchors) >= 0 {
-				c.span.Conf = 0.9
-				out = append(out, c.span)
-				continue
-			}
-		}
-		switch {
-		case c.needsNeighbour && !neighbour:
-			continue // a lone country or a bare city name is just a word
-		case anchored:
-			c.span.Conf = 0.95
-		case neighbour:
-			c.span.Conf = 0.8
-		default:
-			continue // below 0.7 nothing is emitted at all
-		}
-		out = append(out, c.span)
 	}
 
 	if s, ok := d.fallback(ctx, raw); ok {
 		out = append(out, s)
 	}
 	return Resolve(out)
+}
+
+// addrEmitCandidate decides whether one kept candidate becomes a span and with
+// what confidence, applying the anchor, neighbour and residence rules.
+func addrEmitCandidate(ctx *Context, kept []addrCandidate, idx int) (pd.Span, bool) {
+	c := kept[idx]
+	if !ctx.Enabled(c.span.Type) {
+		return pd.Span{}, false
+	}
+	anchored := addrLastPhrase(ctx.Lower, c.span.Start-addrAnchorWindow, c.span.Start, addrAnchors) >= 0
+	neighbour := false
+	if c.needsNeighbour || !anchored {
+		neighbour = addrHasNeighbour(kept, idx)
+	}
+	if s, ok := addrResidenceSpan(ctx, c, neighbour); ok {
+		return s, true
+	}
+	switch {
+	case c.needsNeighbour && !neighbour:
+		return pd.Span{}, false // a lone country or a bare city name is just a word
+	case anchored:
+		c.span.Conf = 0.95
+	case neighbour:
+		c.span.Conf = 0.8
+	default:
+		return pd.Span{}, false // below 0.7 nothing is emitted at all
+	}
+	return c.span, true
+}
+
+// addrResidenceSpan emits a needsNeighbour component when the text explicitly
+// says a person lives there, at the residence confidence.
+func addrResidenceSpan(ctx *Context, c addrCandidate, neighbour bool) (pd.Span, bool) {
+	if !c.needsNeighbour || neighbour || !c.residenceOK {
+		return pd.Span{}, false
+	}
+	if addrLastPhrase(ctx.Lower, c.span.Start-addrAnchorWindow, c.span.Start, addrResidenceAnchors) < 0 {
+		return pd.Span{}, false
+	}
+	c.span.Conf = 0.9
+	return c.span, true
 }
 
 func (d addressDetector) anyEnabled(ctx *Context) bool {
@@ -424,116 +454,189 @@ func (d addressDetector) anyEnabled(ctx *Context) bool {
 
 func addrCaseBlind(ctx *Context) bool { return ctx.Text == ctx.Lower }
 
+// addrScanState carries the running house and street ends that the scan loop
+// threads through its per-token helpers.
+type addrScanState struct {
+	lastHouseEnd  int
+	lastStreetEnd int
+}
+
 func (d addressDetector) scan(ctx *Context, caseBlind bool) []addrCandidate {
 	toks := ctx.Tokens
 	out := make([]addrCandidate, 0, 8)
-	lastHouseEnd := -1
-	lastStreetEnd := -1
+	st := addrScanState{lastHouseEnd: -1, lastStreetEnd: -1}
 
 	for i := 0; i < len(toks); i++ {
-		t := toks[i]
-
-		if t.Kind == text.KindNumber || t.Kind == text.KindAlnum {
-			if t.Kind == text.KindNumber {
-				if c, ok := addrPostalCandidate(ctx, i); ok {
-					out = append(out, c)
-					continue
-				}
-			}
-			if c, ok := addrBareHouse(ctx, i, lastStreetEnd); ok {
-				out = append(out, c)
-				lastHouseEnd = c.span.End
-			}
-			continue
-		}
-
-		if t.Kind != text.KindWord {
-			continue
-		}
-
-		m, after, ok := addrMarkerAt(ctx, i)
-		if !ok {
-			if !caseBlind && !addrStartsUpper(ctx.Text[t.Start:t.End]) {
-				continue
-			}
-			if c, next, ok := addrCountryCandidate(ctx, i); ok {
-				out = append(out, c)
-				i = next - 1
-				continue
-			}
-			c, ok := addrBareCity(ctx, i, caseBlind)
-			if !ok {
-				continue
-			}
-			out = append(out, c)
-			if st, hs, next, ok := addrCommaChain(ctx, i+1, caseBlind); ok {
-				out = append(out, st, hs)
-				lastStreetEnd, lastHouseEnd = st.span.End, hs.span.End
-				i = next - 1
-			}
-			continue
-		}
-
-		switch m.kind {
-		case addrMkStreet:
-			if c, next, ok := addrNamedCandidate(ctx, i, after, caseBlind, true, pd.TypeStreet, "street", false); ok {
-				out = append(out, c)
-				lastStreetEnd = c.span.End
-				if next > 0 && toks[next-1].End > lastStreetEnd {
-					lastStreetEnd = toks[next-1].End
-				}
-				i = next - 1
-			}
-		case addrMkRegion:
-			if c, next, ok := addrNamedCandidate(ctx, i, after, caseBlind, false, pd.TypeCity, addrHintRegion, true); ok {
-				out = append(out, c)
-				i = next - 1
-			}
-		case addrMkCity:
-			if addrIsYearMarker(ctx, i) {
-				continue // "в 2020 г. Иванов" is a year, not a city
-			}
-			if s, e, next, ok := addrScanName(ctx, after, false, caseBlind); ok {
-				out = append(out, addrCandidate{
-					span: pd.Span{Start: s, End: e, Type: pd.TypeCity, Src: "address", Hint: "city"},
-					name: ctx.Lower[s:e],
-				})
-				i = next - 1
-				if st, hs, n2, ok := addrCommaChain(ctx, next, caseBlind); ok {
-					out = append(out, st, hs)
-					lastStreetEnd, lastHouseEnd = st.span.End, hs.span.End
-					i = n2 - 1
-				}
-			}
-		case addrMkHouse:
-			if s, e, next, ok := addrScanValue(ctx, after, false); ok {
-				out = append(out, addrCandidate{
-					span: pd.Span{Start: s, End: e, Type: pd.TypeHouse, Src: "address", Hint: "house"},
-				})
-				lastHouseEnd = e
-				i = next - 1
-			}
-		case addrMkCorpus:
-			if lastHouseEnd < 0 || t.Start-lastHouseEnd > addrCorpusGap {
-				continue
-			}
-			if s, e, next, ok := addrScanValue(ctx, after, true); ok {
-				out = append(out, addrCandidate{
-					span: pd.Span{Start: s, End: e, Type: pd.TypeHouse, Src: "address", Hint: "corpus"},
-				})
-				lastHouseEnd = e
-				i = next - 1
-			}
-		case addrMkApartment:
-			if s, e, next, ok := addrScanValue(ctx, after, false); ok {
-				out = append(out, addrCandidate{
-					span: pd.Span{Start: s, End: e, Type: pd.TypeApartment, Src: "address", Hint: "apartment"},
-				})
-				i = next - 1
-			}
+		if cands, ni, ok := addrScanToken(ctx, i, caseBlind, &st); ok {
+			out = append(out, cands...)
+			i = ni
 		}
 	}
 	return out
+}
+
+// addrScanToken dispatches one token to the handler for its kind: a number, a
+// non-word, a bare word, or an address marker.
+func addrScanToken(ctx *Context, i int, caseBlind bool, st *addrScanState) ([]addrCandidate, int, bool) {
+	t := ctx.Tokens[i]
+	if t.Kind == text.KindNumber || t.Kind == text.KindAlnum {
+		return addrScanNumber(ctx, i, st)
+	}
+	if t.Kind != text.KindWord {
+		return nil, i, false
+	}
+	m, after, ok := addrMarkerAt(ctx, i)
+	if !ok {
+		return addrScanWord(ctx, i, caseBlind, st)
+	}
+	return addrScanMarker(ctx, i, after, m, caseBlind, st)
+}
+
+// addrScanNumber handles a digit or alphanumeric token: a postal code, then a
+// bare house number. It never advances the cursor past the token itself.
+func addrScanNumber(ctx *Context, i int, st *addrScanState) ([]addrCandidate, int, bool) {
+	t := ctx.Tokens[i]
+	if t.Kind == text.KindNumber {
+		if c, ok := addrPostalCandidate(ctx, i); ok {
+			return []addrCandidate{c}, i, true
+		}
+	}
+	if c, ok := addrBareHouse(ctx, i, st.lastStreetEnd); ok {
+		st.lastHouseEnd = c.span.End
+		return []addrCandidate{c}, i, true
+	}
+	return nil, i, false
+}
+
+// addrScanWord handles a word token that is not an address marker: a country, a
+// bare city, and the comma chain that may follow it.
+func addrScanWord(ctx *Context, i int, caseBlind bool, st *addrScanState) ([]addrCandidate, int, bool) {
+	t := ctx.Tokens[i]
+	if !caseBlind && !addrStartsUpper(ctx.Text[t.Start:t.End]) {
+		return nil, i, false
+	}
+	if c, next, ok := addrCountryCandidate(ctx, i); ok {
+		return []addrCandidate{c}, next - 1, true
+	}
+	c, ok := addrBareCity(ctx, i, caseBlind)
+	if !ok {
+		return nil, i, false
+	}
+	cands := []addrCandidate{c}
+	ni := i
+	if st2, hs, next, ok := addrCommaChain(ctx, i+1, caseBlind); ok {
+		cands = append(cands, st2, hs)
+		st.lastStreetEnd, st.lastHouseEnd = st2.span.End, hs.span.End
+		ni = next - 1
+	}
+	return cands, ni, true
+}
+
+// addrScanMarker dispatches an address marker to the helper for its kind.
+func addrScanMarker(ctx *Context, i, after int, m addrMarker, caseBlind bool, st *addrScanState) ([]addrCandidate, int, bool) {
+	switch m.kind {
+	case addrMkStreet:
+		return addrScanStreet(ctx, i, after, caseBlind, st)
+	case addrMkRegion:
+		return addrScanRegion(ctx, i, after, caseBlind)
+	case addrMkCity:
+		return addrScanCity(ctx, i, after, caseBlind, st)
+	case addrMkHouse:
+		return addrScanHouse(ctx, i, after, st)
+	case addrMkCorpus:
+		return addrScanCorpus(ctx, i, after, st)
+	case addrMkApartment:
+		return addrScanApartment(ctx, i, after)
+	}
+	return nil, i, false
+}
+
+// addrScanStreet reads a street name after a street marker and widens the
+// street end to cover any trailing token the name scan consumed.
+func addrScanStreet(ctx *Context, i, after int, caseBlind bool, st *addrScanState) ([]addrCandidate, int, bool) {
+	c, next, ok := addrNamedCandidate(ctx, i, after, caseBlind, addrNamedSpec{
+		typ: pd.TypeStreet, hint: "street", allowOrdinal: true,
+	})
+	if !ok {
+		return nil, i, false
+	}
+	st.lastStreetEnd = c.span.End
+	if next > 0 && ctx.Tokens[next-1].End > st.lastStreetEnd {
+		st.lastStreetEnd = ctx.Tokens[next-1].End
+	}
+	return []addrCandidate{c}, next - 1, true
+}
+
+// addrScanRegion reads an administrative unit after a region marker.
+func addrScanRegion(ctx *Context, i, after int, caseBlind bool) ([]addrCandidate, int, bool) {
+	c, next, ok := addrNamedCandidate(ctx, i, after, caseBlind, addrNamedSpec{
+		typ: pd.TypeCity, hint: addrHintRegion, needsNeighbour: true,
+	})
+	if !ok {
+		return nil, i, false
+	}
+	return []addrCandidate{c}, next - 1, true
+}
+
+// addrScanCity reads a settlement name after a city marker, then the comma
+// chain that may follow it.
+func addrScanCity(ctx *Context, i, after int, caseBlind bool, st *addrScanState) ([]addrCandidate, int, bool) {
+	if addrIsYearMarker(ctx, i) {
+		return nil, i, false // "в 2020 г. Иванов" is a year, not a city
+	}
+	s, e, next, ok := addrScanName(ctx, after, false, caseBlind)
+	if !ok {
+		return nil, i, false
+	}
+	cands := []addrCandidate{{
+		span: pd.Span{Start: s, End: e, Type: pd.TypeCity, Src: "address", Hint: "city"},
+		name: ctx.Lower[s:e],
+	}}
+	ni := next - 1
+	if st2, hs, n2, ok := addrCommaChain(ctx, next, caseBlind); ok {
+		cands = append(cands, st2, hs)
+		st.lastStreetEnd, st.lastHouseEnd = st2.span.End, hs.span.End
+		ni = n2 - 1
+	}
+	return cands, ni, true
+}
+
+// addrScanHouse reads a house number after a house marker.
+func addrScanHouse(ctx *Context, i, after int, st *addrScanState) ([]addrCandidate, int, bool) {
+	s, e, next, ok := addrScanValue(ctx, after, false)
+	if !ok {
+		return nil, i, false
+	}
+	st.lastHouseEnd = e
+	return []addrCandidate{{
+		span: pd.Span{Start: s, End: e, Type: pd.TypeHouse, Src: "address", Hint: "house"},
+	}}, next - 1, true
+}
+
+// addrScanCorpus reads a corpus number, but only when a house stands nearby.
+func addrScanCorpus(ctx *Context, i, after int, st *addrScanState) ([]addrCandidate, int, bool) {
+	if st.lastHouseEnd < 0 || ctx.Tokens[i].Start-st.lastHouseEnd > addrCorpusGap {
+		return nil, i, false
+	}
+	s, e, next, ok := addrScanValue(ctx, after, true)
+	if !ok {
+		return nil, i, false
+	}
+	st.lastHouseEnd = e
+	return []addrCandidate{{
+		span: pd.Span{Start: s, End: e, Type: pd.TypeHouse, Src: "address", Hint: "corpus"},
+	}}, next - 1, true
+}
+
+// addrScanApartment reads a flat number after an apartment marker.
+func addrScanApartment(ctx *Context, i, after int) ([]addrCandidate, int, bool) {
+	s, e, next, ok := addrScanValue(ctx, after, false)
+	if !ok {
+		return nil, i, false
+	}
+	return []addrCandidate{{
+		span: pd.Span{Start: s, End: e, Type: pd.TypeApartment, Src: "address", Hint: "apartment"},
+	}}, next - 1, true
 }
 
 func init() { Register(addressDetector{}) }

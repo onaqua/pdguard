@@ -68,39 +68,78 @@ func addrOrgHead(lower string, ws, we, at int) int {
 	if ns >= 0 {
 		next = lower[ns:ne]
 	}
+	return addrOrgHeadKind(head, next, lower, ne, at, we)
+}
+
+// addrOrgHeadKind resolves the head noun of an organisation heading by its
+// kind, delegating each case to a small helper.
+func addrOrgHeadKind(head, next, lower string, ne, at, we int) int {
 	switch head {
 	case "пункт", "пункты":
-		if next == "выдачи" || next == "обслуживания" ||
-			next == "приёма" || next == "приема" || next == "продаж" {
-			return ne
-		}
+		return addrOrgHeadPunkt(next, ne)
 	case "точка", "точки":
-		if next == "обслуживания" || next == "продаж" {
-			return ne
-		}
+		return addrOrgHeadTochka(next, ne)
 	case "юридический":
-		// A legal address is an organisation's by definition; no owner needed.
-		if next == "адрес" {
-			return ne
-		}
+		return addrOrgHeadLegal(next, ne)
 	case "фактический", "почтовый":
-		if next == "адрес" {
-			if ts, te := addrNextWord(lower, ne, at); ts >= 0 {
-				if _, ok := addrOrgOwners[lower[ts:te]]; ok {
-					return te
-				}
-			}
-		}
+		return addrOrgHeadActual(next, lower, ne, at)
 	default:
-		if _, ok := addrOrgSubjectNouns[head]; !ok {
-			return -1
-		}
-		if _, person := addrOrgSubjectPersons[next]; person {
-			return -1 // "офис клиента" — a person's workplace, still personal
-		}
-		return we
+		return addrOrgHeadNoun(head, next, we)
+	}
+}
+
+// addrOrgHeadPunkt accepts a "пункт" heading when the next word names what the
+// point serves.
+func addrOrgHeadPunkt(next string, ne int) int {
+	if next == "выдачи" || next == "обслуживания" ||
+		next == "приёма" || next == "приема" || next == "продаж" {
+		return ne
 	}
 	return -1
+}
+
+// addrOrgHeadTochka accepts a "точка" heading when the next word names what the
+// point sells or serves.
+func addrOrgHeadTochka(next string, ne int) int {
+	if next == "обслуживания" || next == "продаж" {
+		return ne
+	}
+	return -1
+}
+
+// addrOrgHeadLegal accepts a "юридический адрес" heading; a legal address is an
+// organisation's by definition, so no owner is needed.
+func addrOrgHeadLegal(next string, ne int) int {
+	if next == "адрес" {
+		return ne
+	}
+	return -1
+}
+
+// addrOrgHeadActual accepts a "фактический"/"почтовый адрес" heading only when
+// an organisation owner follows it.
+func addrOrgHeadActual(next, lower string, ne, at int) int {
+	if next != "адрес" {
+		return -1
+	}
+	if ts, te := addrNextWord(lower, ne, at); ts >= 0 {
+		if _, ok := addrOrgOwners[lower[ts:te]]; ok {
+			return te
+		}
+	}
+	return -1
+}
+
+// addrOrgHeadNoun accepts a plain subject noun heading, rejecting a person's
+// workplace.
+func addrOrgHeadNoun(head, next string, we int) int {
+	if _, ok := addrOrgSubjectNouns[head]; !ok {
+		return -1
+	}
+	if _, person := addrOrgSubjectPersons[next]; person {
+		return -1 // "офис клиента" — a person's workplace, still personal
+	}
+	return we
 }
 
 func addrSentenceStart(lower string, at int) int {
@@ -342,13 +381,20 @@ func addrCommaChain(ctx *Context, after int, caseBlind bool) (street, house addr
 	return street, house, k + 1, true
 }
 
-func addrNamedCandidate(ctx *Context, idx, after int, caseBlind, allowOrdinal bool,
-	typ pd.Type, hint string, needsNeighbour bool) (addrCandidate, int, bool) {
+// addrNamedSpec describes the candidate a named-address scan should build.
+type addrNamedSpec struct {
+	typ            pd.Type
+	hint           string
+	needsNeighbour bool
+	allowOrdinal   bool
+}
 
-	if s, e, next, ok := addrScanName(ctx, after, allowOrdinal, caseBlind); ok {
+func addrNamedCandidate(ctx *Context, idx, after int, caseBlind bool, spec addrNamedSpec) (addrCandidate, int, bool) {
+
+	if s, e, next, ok := addrScanName(ctx, after, spec.allowOrdinal, caseBlind); ok {
 		return addrCandidate{
-			span:           pd.Span{Start: s, End: e, Type: typ, Src: "address", Hint: hint},
-			needsNeighbour: needsNeighbour,
+			span:           pd.Span{Start: s, End: e, Type: spec.typ, Src: "address", Hint: spec.hint},
+			needsNeighbour: spec.needsNeighbour,
 			name:           ctx.Lower[s:e],
 		}, next, true
 	}
@@ -359,7 +405,7 @@ func addrNamedCandidate(ctx *Context, idx, after int, caseBlind, allowOrdinal bo
 		return addrCandidate{}, idx, false
 	}
 	if !addrIsNameWord(ctx, toks[p], caseBlind) &&
-		!(hint == addrHintRegion && addrIsRegionAdjective(ctx, toks[p], caseBlind)) {
+		!(spec.hint == addrHintRegion && addrIsRegionAdjective(ctx, toks[p], caseBlind)) {
 		return addrCandidate{}, idx, false
 	}
 	start, end := toks[p].Start, toks[p].End
@@ -372,8 +418,8 @@ func addrNamedCandidate(ctx *Context, idx, after int, caseBlind, allowOrdinal bo
 		return addrCandidate{}, idx, false // that word is the city, not the street
 	}
 	return addrCandidate{
-		span:           pd.Span{Start: start, End: end, Type: typ, Src: "address", Hint: hint},
-		needsNeighbour: needsNeighbour,
+		span:           pd.Span{Start: start, End: end, Type: spec.typ, Src: "address", Hint: spec.hint},
+		needsNeighbour: spec.needsNeighbour,
 		name:           w,
 	}, after, true
 }
@@ -584,21 +630,44 @@ func addrScanName(ctx *Context, i int, allowOrdinal, caseBlind bool) (start, end
 	start, end = -1, -1
 
 	if allowOrdinal && toks[k].Kind == text.KindNumber {
-		start, end = toks[k].Start, toks[k].End
-		k++
-		if k+1 < len(toks) && addrPunctByte(ctx, toks[k], '-') &&
-			toks[k+1].Kind == text.KindWord && toks[k+1].Len() <= 4 {
-			end = toks[k+1].End
-			k += 2
-		}
-		n := addrSkipSpace(toks, k)
-		// A bare number after a street marker is a house number, not a name.
-		if n < 0 || toks[n].Kind != text.KindWord || !addrIsNameWord(ctx, toks[n], caseBlind) {
+		var nk int
+		start, end, nk, ok = addrScanOrdinal(ctx, k, caseBlind)
+		if !ok {
 			return 0, 0, i, false
 		}
-		k = n
+		k = nk
 	}
 
+	start, end, k, ok = addrScanNameWords(ctx, k, start, end, caseBlind)
+	if !ok {
+		return 0, 0, i, false
+	}
+	return start, end, k, true
+}
+
+// addrScanOrdinal reads an ordinal prefix ("5-я") of a street name and the name
+// word that must follow it.
+func addrScanOrdinal(ctx *Context, k int, caseBlind bool) (start, end, next int, ok bool) {
+	toks := ctx.Tokens
+	start, end = toks[k].Start, toks[k].End
+	k++
+	if k+1 < len(toks) && addrPunctByte(ctx, toks[k], '-') &&
+		toks[k+1].Kind == text.KindWord && toks[k+1].Len() <= 4 {
+		end = toks[k+1].End
+		k += 2
+	}
+	n := addrSkipSpace(toks, k)
+	// A bare number after a street marker is a house number, not a name.
+	if n < 0 || toks[n].Kind != text.KindWord || !addrIsNameWord(ctx, toks[n], caseBlind) {
+		return 0, 0, k, false
+	}
+	return start, end, n, true
+}
+
+// addrScanNameWords walks the consecutive words of a toponym, extending across
+// hyphens and single spaces.
+func addrScanNameWords(ctx *Context, k, start, end int, caseBlind bool) (int, int, int, bool) {
+	toks := ctx.Tokens
 	for words := 0; k < len(toks) && words < addrMaxNameWords; words++ {
 		t := toks[k]
 		if t.Kind != text.KindWord || !addrIsNameWord(ctx, t, caseBlind) {
@@ -609,22 +678,33 @@ func addrScanName(ctx *Context, i int, allowOrdinal, caseBlind bool) (start, end
 		}
 		end = t.End
 		k++
-		for k+1 < len(toks) && addrPunctByte(ctx, toks[k], '-') && toks[k+1].Kind == text.KindWord {
-			end = toks[k+1].End
-			k += 2
-		}
+		k = addrExtendHyphen(ctx, k, &end)
 		// Continue only across exactly one space: any punctuation ends the name.
-		if k+1 < len(toks) && toks[k].Kind == text.KindSpace &&
-			toks[k+1].Kind == text.KindWord && addrIsNameWord(ctx, toks[k+1], caseBlind) {
+		if addrCanContinueName(ctx, k, caseBlind) {
 			k++
 			continue
 		}
 		break
 	}
-	if start < 0 || end < 0 {
-		return 0, 0, i, false
+	return start, end, k, start >= 0 && end >= 0
+}
+
+// addrExtendHyphen folds a hyphenated tail ("Ленина-Кузнецова") into the name.
+func addrExtendHyphen(ctx *Context, k int, end *int) int {
+	toks := ctx.Tokens
+	for k+1 < len(toks) && addrPunctByte(ctx, toks[k], '-') && toks[k+1].Kind == text.KindWord {
+		*end = toks[k+1].End
+		k += 2
 	}
-	return start, end, k, true
+	return k
+}
+
+// addrCanContinueName reports whether the name may continue across exactly one
+// space into another name word.
+func addrCanContinueName(ctx *Context, k int, caseBlind bool) bool {
+	toks := ctx.Tokens
+	return k+1 < len(toks) && toks[k].Kind == text.KindSpace &&
+		toks[k+1].Kind == text.KindWord && addrIsNameWord(ctx, toks[k+1], caseBlind)
 }
 
 func addrIsNameWord(ctx *Context, t text.Token, caseBlind bool) bool {
@@ -704,11 +784,8 @@ func (d addressDetector) fallback(ctx *Context, raw []addrCandidate) (pd.Span, b
 		_, wordEnd := text.ExpandWord(ctx.Lower, j, off)
 		form := ctx.Lower[j:wordEnd]
 
-		p := wordEnd
-		for p < len(ctx.Lower) && (ctx.Lower[p] == ' ' || ctx.Lower[p] == '\t') {
-			p++
-		}
-		if p < len(ctx.Lower) && (ctx.Lower[p] == ':' || ctx.Lower[p] == '-') {
+		p := addrSkipSpaces(ctx.Lower, wordEnd)
+		if addrColonOrDash(ctx.Lower, p) {
 			p++
 		} else if form != "адресу" {
 			continue // "адрес" without a colon is a sentence, not a value
@@ -720,10 +797,21 @@ func (d addressDetector) fallback(ctx *Context, raw []addrCandidate) (pd.Span, b
 	return pd.Span{}, false
 }
 
-func addrFallbackRun(ctx *Context, p int, raw []addrCandidate) (pd.Span, bool) {
-	for p < len(ctx.Text) && (ctx.Text[p] == ' ' || ctx.Text[p] == '\t') {
+// addrSkipSpaces advances p past any run of spaces and tabs.
+func addrSkipSpaces(s string, p int) int {
+	for p < len(s) && (s[p] == ' ' || s[p] == '\t') {
 		p++
 	}
+	return p
+}
+
+// addrColonOrDash reports whether a colon or a dash stands at p.
+func addrColonOrDash(s string, p int) bool {
+	return p < len(s) && (s[p] == ':' || s[p] == '-')
+}
+
+func addrFallbackRun(ctx *Context, p int, raw []addrCandidate) (pd.Span, bool) {
+	p = addrSkipSpaces(ctx.Text, p)
 	end := addrCutRun(ctx.Text, p)
 	start, end, ok := text.TrimSpanEdges(ctx.Text, p, end)
 	if !ok || end-start < 10 {
@@ -737,10 +825,8 @@ func addrFallbackRun(ctx *Context, p int, raw []addrCandidate) (pd.Span, bool) {
 	if len(strings.Fields(run)) < 2 {
 		return pd.Span{}, false
 	}
-	for _, c := range raw {
-		if c.span.Start < end && start < c.span.End {
-			return pd.Span{}, false // decomposed (or deliberately dropped) already
-		}
+	if addrOverlapsRaw(raw, start, end) {
+		return pd.Span{}, false // decomposed (or deliberately dropped) already
 	}
 	if addrLastPhrase(ctx.Lower, start-addrBankWindow, start, addrBankWords) >= 0 {
 		return pd.Span{}, false
@@ -752,6 +838,17 @@ func addrFallbackRun(ctx *Context, p int, raw []addrCandidate) (pd.Span, bool) {
 		Start: start, End: end, Type: pd.TypeAddress,
 		Conf: 0.9, Src: "address", Hint: "full",
 	}, true
+}
+
+// addrOverlapsRaw reports whether [start,end) overlaps any already-decomposed
+// candidate.
+func addrOverlapsRaw(raw []addrCandidate, start, end int) bool {
+	for _, c := range raw {
+		if c.span.Start < end && start < c.span.End {
+			return true
+		}
+	}
+	return false
 }
 
 func addrCutRun(s string, p int) int {

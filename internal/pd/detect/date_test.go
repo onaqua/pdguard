@@ -24,15 +24,18 @@ func TestDateDetectorName(t *testing.T) {
 	}
 }
 
+// datePositiveCase is one positive date-detection case.
+type datePositiveCase struct {
+	name string
+	in   string
+	want string // exact substring the span must cover
+	typ  pd.Type
+	hint string
+	conf float64
+}
+
 func TestDateDetectPositive(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want string // exact substring the span must cover
-		typ  pd.Type
-		hint string
-		conf float64
-	}{
+	cases := []datePositiveCase{
 		{name: "dotted dmy", in: "Дата рождения: 12.05.1990", want: "12.05.1990",
 			typ: pd.TypeBirthDate, hint: "dmy", conf: 0.90},
 		{name: "slashed dmy", in: "дата рождения 12/05/1990", want: "12/05/1990",
@@ -127,27 +130,34 @@ func TestDateDetectPositive(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := dateSpans(t, tc.in)
-			if len(got) != 1 {
-				t.Fatalf("got %d spans %v, want exactly 1", len(got), dump(tc.in, got))
-			}
-			s := got[0]
-			if have := tc.in[s.Start:s.End]; have != tc.want {
-				t.Errorf("span covers %q, want %q", have, tc.want)
-			}
-			if s.Type != tc.typ {
-				t.Errorf("type = %s, want %s", s.Type, tc.typ)
-			}
-			if s.Hint != tc.hint {
-				t.Errorf("hint = %q, want %q", s.Hint, tc.hint)
-			}
-			if s.Src != "date" {
-				t.Errorf("src = %q, want %q", s.Src, "date")
-			}
-			if math.Abs(s.Conf-tc.conf) > 1e-9 {
-				t.Errorf("conf = %v, want %v", s.Conf, tc.conf)
-			}
+			assertDatePositive(t, tc)
 		})
+	}
+}
+
+// assertDatePositive checks that one positive date case produces exactly the
+// expected span.
+func assertDatePositive(t *testing.T, tc datePositiveCase) {
+	t.Helper()
+	got := dateSpans(t, tc.in)
+	if len(got) != 1 {
+		t.Fatalf("got %d spans %v, want exactly 1", len(got), dump(tc.in, got))
+	}
+	s := got[0]
+	if have := tc.in[s.Start:s.End]; have != tc.want {
+		t.Errorf("span covers %q, want %q", have, tc.want)
+	}
+	if s.Type != tc.typ {
+		t.Errorf("type = %s, want %s", s.Type, tc.typ)
+	}
+	if s.Hint != tc.hint {
+		t.Errorf("hint = %q, want %q", s.Hint, tc.hint)
+	}
+	if s.Src != "date" {
+		t.Errorf("src = %q, want %q", s.Src, "date")
+	}
+	if math.Abs(s.Conf-tc.conf) > 1e-9 {
+		t.Errorf("conf = %v, want %v", s.Conf, tc.conf)
 	}
 }
 
@@ -584,20 +594,7 @@ func TestDateWordYear(t *testing.T) {
 	}
 	for _, tc := range ok {
 		t.Run(tc.in, func(t *testing.T) {
-			ctx := NewContext(tc.in, nil)
-			var gate int8
-			got, last, found := dateWordYear(ctx, 0, &gate)
-			if !found {
-				t.Fatalf("dateWordYear(%q) found nothing", tc.in)
-			}
-			if got != tc.want {
-				t.Errorf("dateWordYear(%q) = %d, want %d", tc.in, got, tc.want)
-			}
-			// The year must end on its own last word, so the caller can put
-			// the span boundary there and leave a trailing "года" outside it.
-			if end := ctx.Tokens[last].End; end != len(tc.in) {
-				t.Errorf("year ends at %d, want %d (trailing %q)", end, len(tc.in), tc.in[end:])
-			}
+			assertWordYearOK(t, tc)
 		})
 	}
 
@@ -614,12 +611,45 @@ func TestDateWordYear(t *testing.T) {
 	}
 	for _, tc := range bad {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := NewContext(tc.in, nil)
-			var gate int8
-			if y, _, found := dateWordYear(ctx, tc.at, &gate); found {
-				t.Errorf("dateWordYear(%q, %d) = %d, want no match", tc.in, tc.at, y)
-			}
+			assertWordYearBad(t, tc)
 		})
+	}
+}
+
+// assertWordYearOK checks that a spelled-out year parses to the expected value
+// and ends on its own last word.
+func assertWordYearOK(t *testing.T, tc struct {
+	in   string
+	want int
+}) {
+	t.Helper()
+	ctx := NewContext(tc.in, nil)
+	var gate int8
+	got, last, found := dateWordYear(ctx, 0, &gate)
+	if !found {
+		t.Fatalf("dateWordYear(%q) found nothing", tc.in)
+	}
+	if got != tc.want {
+		t.Errorf("dateWordYear(%q) = %d, want %d", tc.in, got, tc.want)
+	}
+	// The year must end on its own last word, so the caller can put
+	// the span boundary there and leave a trailing "года" outside it.
+	if end := ctx.Tokens[last].End; end != len(tc.in) {
+		t.Errorf("year ends at %d, want %d (trailing %q)", end, len(tc.in), tc.in[end:])
+	}
+}
+
+// assertWordYearBad checks that a spelled-out year is refused.
+func assertWordYearBad(t *testing.T, tc struct {
+	name string
+	in   string
+	at   int
+}) {
+	t.Helper()
+	ctx := NewContext(tc.in, nil)
+	var gate int8
+	if y, _, found := dateWordYear(ctx, tc.at, &gate); found {
+		t.Errorf("dateWordYear(%q, %d) = %d, want no match", tc.in, tc.at, y)
 	}
 }
 

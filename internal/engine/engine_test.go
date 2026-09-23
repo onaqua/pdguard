@@ -455,24 +455,31 @@ func TestLongPayloadRoundTrip(t *testing.T) {
 func TestSplitPointsCoverInputOnRuneBoundaries(t *testing.T) {
 	src := strings.Repeat("абвгд ежзий\n", 5000) // multi-byte, with separators
 	for _, limit := range []int{64, 1000, 4096} {
-		cuts := splitPoints(src, limit)
-		if cuts[0] != 0 || cuts[len(cuts)-1] != len(src) {
-			t.Fatalf("limit %d: cuts do not span the input: %v..%v", limit, cuts[0], cuts[len(cuts)-1])
+		checkSplitPoints(t, src, limit)
+	}
+}
+
+// checkSplitPoints verifies that splitPoints for one limit covers the whole
+// input, never lands inside a rune, and reassembles the original text.
+func checkSplitPoints(t *testing.T, src string, limit int) {
+	t.Helper()
+	cuts := splitPoints(src, limit)
+	if cuts[0] != 0 || cuts[len(cuts)-1] != len(src) {
+		t.Fatalf("limit %d: cuts do not span the input: %v..%v", limit, cuts[0], cuts[len(cuts)-1])
+	}
+	var joined strings.Builder
+	for i := 0; i+1 < len(cuts); i++ {
+		from, to := cuts[i], cuts[i+1]
+		if to <= from {
+			t.Fatalf("limit %d: non-increasing cut %d..%d", limit, from, to)
 		}
-		var joined strings.Builder
-		for i := 0; i+1 < len(cuts); i++ {
-			from, to := cuts[i], cuts[i+1]
-			if to <= from {
-				t.Fatalf("limit %d: non-increasing cut %d..%d", limit, from, to)
-			}
-			if src[from]&0xC0 == 0x80 {
-				t.Fatalf("limit %d: cut at %d lands inside a rune", limit, from)
-			}
-			joined.WriteString(src[from:to])
+		if src[from]&0xC0 == 0x80 {
+			t.Fatalf("limit %d: cut at %d lands inside a rune", limit, from)
 		}
-		if joined.String() != src {
-			t.Fatalf("limit %d: chunks do not reassemble the input", limit)
-		}
+		joined.WriteString(src[from:to])
+	}
+	if joined.String() != src {
+		t.Fatalf("limit %d: chunks do not reassemble the input", limit)
 	}
 }
 

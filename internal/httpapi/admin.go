@@ -193,14 +193,25 @@ func (s *Server) handleAdminDetect(w http.ResponseWriter, r *http.Request) {
 		s.writeDecodeError(w, err)
 		return
 	}
+	sys := s.resolveDetectSystem(r)
+	out := buildDetectResponse(req.Payload, sys)
+	s.writeJSON(w, http.StatusOK, out)
+}
 
+// resolveDetectSystem picks the system the debug endpoint should judge against.
+func (s *Server) resolveDetectSystem(r *http.Request) *config.System {
 	cfg := s.cfg.Get()
 	sysID := strings.TrimSpace(r.Header.Get(HeaderSystemID))
 	sys, ok := cfg.System(sysID)
 	if !ok || sys == nil {
 		sys, _ = cfg.System(cfg.DefaultSystem)
 	}
+	return sys
+}
 
+// buildDetectResponse runs detection and filters the spans by the system's
+// rules, mirroring what the engine would mask.
+func buildDetectResponse(payload string, sys *config.System) detectResponse {
 	enabled := func(t pd.Type) bool {
 		if sys == nil {
 			return true
@@ -208,10 +219,9 @@ func (s *Server) handleAdminDetect(w http.ResponseWriter, r *http.Request) {
 		rule, ok := sys.Rule(t)
 		return ok && rule.Enabled
 	}
-
-	spans := detect.Run(detect.NewContext(req.Payload, enabled))
+	spans := detect.Run(detect.NewContext(payload, enabled))
 	out := detectResponse{
-		Bytes: len(req.Payload),
+		Bytes: len(payload),
 		Types: make(map[string]int, 8),
 		Spans: make([]detectHit, 0, len(spans)),
 	}
@@ -219,18 +229,8 @@ func (s *Server) handleAdminDetect(w http.ResponseWriter, r *http.Request) {
 		out.System = sys.ID
 	}
 	for _, sp := range spans {
-		if sys != nil {
-			rule, ok := sys.Rule(sp.Type)
-			if !ok || !rule.Enabled {
-				continue
-			}
-			floor := rule.MinConfidence
-			if floor <= 0 {
-				floor = config.DefaultMinConfidence
-			}
-			if sp.Conf < floor {
-				continue
-			}
+		if !spanAllowed(sys, sp) {
+			continue
 		}
 		name := string(sp.Type)
 		out.Types[name]++
@@ -240,5 +240,22 @@ func (s *Server) handleAdminDetect(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	out.Count = len(out.Spans)
-	s.writeJSON(w, http.StatusOK, out)
+	return out
+}
+
+// spanAllowed reports whether a detection passes the system's enabled and
+// confidence rules.
+func spanAllowed(sys *config.System, sp pd.Span) bool {
+	if sys == nil {
+		return true
+	}
+	rule, ok := sys.Rule(sp.Type)
+	if !ok || !rule.Enabled {
+		return false
+	}
+	floor := rule.MinConfidence
+	if floor <= 0 {
+		floor = config.DefaultMinConfidence
+	}
+	return sp.Conf >= floor
 }

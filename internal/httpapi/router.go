@@ -38,21 +38,22 @@ import (
 
 // Route paths, named so the middleware and the tests cannot drift from the mux.
 const (
-	pathProcess      = "/process"
-	pathHealth       = "/health"
-	pathReady        = "/ready"
-	pathMetrics      = "/metrics"
-	pathStats        = "/stats"
-	pathAdminConfig  = "/admin/config"
-	pathAdminDetect  = "/admin/detect"
-	pathOpenAPI      = "/openapi.yaml"
-	pathUI           = "/"
-	pathDemo         = "/demo"
-	contentTypeJSON  = "application/json; charset=utf-8"
-	contentTypeText  = "text/plain; version=0.0.4; charset=utf-8"
-	contentTypeYAML  = "application/yaml; charset=utf-8"
-	retryAfterHint   = time.Second
-	maxPooledBufSize = 1 << 20
+	pathProcess       = "/process"
+	pathHealth        = "/health"
+	pathReady         = "/ready"
+	pathMetrics       = "/metrics"
+	pathStats         = "/stats"
+	pathAdminConfig   = "/admin/config"
+	pathAdminDetect   = "/admin/detect"
+	pathOpenAPI       = "/openapi.yaml"
+	pathUI            = "/"
+	pathDemo          = "/demo"
+	contentTypeJSON   = "application/json; charset=utf-8"
+	contentTypeText   = "text/plain; version=0.0.4; charset=utf-8"
+	contentTypeYAML   = "application/yaml; charset=utf-8"
+	headerContentType = "Content-Type"
+	retryAfterHint    = time.Second
+	maxPooledBufSize  = 1 << 20
 )
 
 // Request headers. All of them are optional on /process: the graded request
@@ -243,7 +244,7 @@ func (s *Server) writeJSON(w http.ResponseWriter, status int, v any) {
 		return
 	}
 	h := w.Header()
-	h.Set("Content-Type", contentTypeJSON)
+	h.Set(headerContentType, contentTypeJSON)
 	h.Set("Content-Length", strconv.Itoa(buf.Len()))
 	w.WriteHeader(status)
 	_, _ = w.Write(buf.Bytes())
@@ -282,7 +283,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 // handleMetrics renders the Prometheus exposition format.
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	s.refreshStoreStats()
-	w.Header().Set("Content-Type", contentTypeText)
+	w.Header().Set(headerContentType, contentTypeText)
 	w.WriteHeader(http.StatusOK)
 	metrics.WritePrometheus(w)
 }
@@ -333,7 +334,7 @@ func (s *Server) handleOpenAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h := w.Header()
-	h.Set("Content-Type", contentTypeYAML)
+	h.Set(headerContentType, contentTypeYAML)
 	h.Set("Content-Length", strconv.Itoa(len(spec)))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(spec)

@@ -67,25 +67,36 @@ func FamousMentionLeft(ctx *Context, off int) bool {
 		if off-t.Start > fioFamousMentionWindow {
 			return false
 		}
-		switch t.Kind {
-		case text.KindWord:
-			if dict.IsFamousSurnameForm(ctx.Lower[t.Start:t.End]) {
-				return true
-			}
-		case text.KindSpace:
-			if strings.ContainsAny(t.In(ctx.Text), "\n\r") {
-				return false
-			}
-		case text.KindPunct:
-			if strings.ContainsAny(t.In(ctx.Text), "!?;") {
-				return false
-			}
-			if t.In(ctx.Text) == "." && !fioAbbrevDot(ctx, i) {
-				return false
-			}
+		if stop, result := fioFamousMentionToken(ctx, i, off); stop {
+			return result
 		}
 	}
 	return false
+}
+
+// fioFamousMentionToken applies the public-figure veto to a single token to the
+// left of off. It returns (stop, result): when stop is true the scan must halt
+// immediately with the given result.
+func fioFamousMentionToken(ctx *Context, i, off int) (stop, result bool) {
+	t := ctx.Tokens[i]
+	switch t.Kind {
+	case text.KindWord:
+		if dict.IsFamousSurnameForm(ctx.Lower[t.Start:t.End]) {
+			return true, true
+		}
+	case text.KindSpace:
+		if strings.ContainsAny(t.In(ctx.Text), "\n\r") {
+			return true, false
+		}
+	case text.KindPunct:
+		if strings.ContainsAny(t.In(ctx.Text), "!?;") {
+			return true, false
+		}
+		if t.In(ctx.Text) == "." && !fioAbbrevDot(ctx, i) {
+			return true, false
+		}
+	}
+	return false, false
 }
 
 func init() {
@@ -262,27 +273,8 @@ func fioScanRussian(ctx *Context, out []pd.Span, caseBlind bool) []pd.Span {
 // "Иванов Иван Иванович" is never reported as the shorter "Иванов Иван".
 func fioTryMatch(ctx *Context, cls []fioClass, i int, caseBlind bool) (fioMatch, bool) {
 	// Ветвь A. Инициалы перед фамилией: «И.И. Иванов», «И. И. Иванов».
-	if n, iniLast, _, amb := fioReadInitials(ctx, i); n > 0 || amb {
-		if j, ok := fioNextWordTok(ctx, iniLast); ok {
-			if c, ok := fioReadComponent(ctx, cls, j); ok && c.cls&fioClsSurname != 0 {
-				switch {
-				case !amb:
-					conf := fioConfInitials1
-					if n == 2 {
-						conf = fioConfInitials2
-					}
-					return fioMatch{
-						start: ctx.Tokens[i].Start, end: c.end, lastTok: c.lastTok,
-						conf: conf, hint: "surname_initials", surname: c.lower,
-					}, true
-				case fioAmbiguousInitialOK(ctx, i, c):
-					return fioMatch{
-						start: ctx.Tokens[i].Start, end: c.end, lastTok: c.lastTok,
-						conf: fioConfInitialsAmb, hint: "surname_initials", surname: c.lower,
-					}, true
-				}
-			}
-		}
+	if m, ok := fioTryInitialsBefore(ctx, cls, i); ok {
+		return m, true
 	}
 
 	c1, ok := fioReadComponent(ctx, cls, i)
@@ -290,8 +282,38 @@ func fioTryMatch(ctx *Context, cls []fioClass, i int, caseBlind bool) (fioMatch,
 		return fioMatch{}, false
 	}
 
-	var c2, c3 fioComp
-	c2ok, c3ok := false, false
+	c2, c3, c2ok, c3ok := fioReadComponents(ctx, cls, c1)
+
+	// Ветвь B. Три компонента.
+	if c3ok {
+		if m, ok := fioTryThreeComponents(cls, c1, c2, c3); ok {
+			return m, true
+		}
+	}
+
+	// Ветвь C. Фамилия, за которой идут инициалы: «Иванов И.И.».
+	if c1.cls&fioClsSurname != 0 {
+		if m, ok := fioTrySurnameInitials(ctx, c1); ok {
+			return m, true
+		}
+	}
+
+	// Ветвь D. Два компонента.
+	if c2ok {
+		if m, ok := fioTryTwoComponents(ctx, cls, i, c1, c2, caseBlind); ok {
+			return m, true
+		}
+	}
+
+	// Ветвь E. Одиночная фамилия.
+	if m, ok := fioTryLoneSurname(ctx, i, c1, caseBlind); ok {
+		return m, true
+	}
+	return fioMatch{}, false
+}
+
+// fioReadComponents reads the second and third name components after c1.
+func fioReadComponents(ctx *Context, cls []fioClass, c1 fioComp) (c2, c3 fioComp, c2ok, c3ok bool) {
 	if j, sp := fioNextWordTok(ctx, c1.lastTok); sp {
 		c2, c2ok = fioReadComponent(ctx, cls, j)
 	}
@@ -306,68 +328,100 @@ func fioTryMatch(ctx *Context, cls []fioClass, i int, caseBlind bool) (fioMatch,
 			c3ok = false
 		}
 	}
+	return c2, c3, c2ok, c3ok
+}
 
-	// Ветвь B. Три компонента. Отчество — якорь обоих порядков; его
-	// морфология (-ович/-евна/-оглы) однозначна, и именно это позволяет
-	// принять среднее/первое слово по «слабому» тесту.
-	if c3ok {
-		switch {
-		case c3.cls&fioClsPatr != 0 && c1.cls&fioClsSurname != 0 && fioLoose(cls, c2):
-			return fioMatch{start: c1.start, end: c3.end, lastTok: c3.lastTok,
-				conf: fioConfFull, hint: "full", surname: c1.lower}, true
-		case c2.cls&fioClsPatr != 0 && c3.cls&fioClsSurname != 0 && fioLoose(cls, c1):
-			return fioMatch{start: c1.start, end: c3.end, lastTok: c3.lastTok,
-				conf: fioConfFull, hint: "full", surname: c3.lower}, true
-		}
+// fioTryInitialsBefore tries the initials-before-surname shape (branch A).
+func fioTryInitialsBefore(ctx *Context, cls []fioClass, i int) (fioMatch, bool) {
+	n, iniLast, _, amb := fioReadInitials(ctx, i)
+	if n == 0 && !amb {
+		return fioMatch{}, false
 	}
-
-	// Ветвь C. Фамилия, за которой идут инициалы: «Иванов И.И.».
-	if c1.cls&fioClsSurname != 0 {
-		if n, last, end := fioReadInitialsAfter(ctx, c1.lastTok); n > 0 {
-			conf := fioConfInitials1
-			if n == 2 {
-				conf = fioConfInitials2
-			}
-			return fioMatch{start: c1.start, end: end, lastTok: last,
-				conf: conf, hint: "surname_initials", surname: c1.lower}, true
-		}
+	j, ok := fioNextWordTok(ctx, iniLast)
+	if !ok {
+		return fioMatch{}, false
 	}
-
-	// Ветвь D. Два компонента.
-	if c2ok {
-		switch {
-		case c2.cls&fioClsPatr != 0 && fioLoose(cls, c1):
-			return fioMatch{start: c1.start, end: c2.end, lastTok: c2.lastTok,
-				conf: fioConfPair, hint: "name_patronymic"}, true
-		case c1.cls&fioClsFirst != 0 && c2.cls&fioClsSurname != 0:
-			return fioMatch{start: c1.start, end: c2.end, lastTok: c2.lastTok,
-				conf: fioConfPair, hint: "surname_name", surname: c2.lower}, true
-		case c1.cls&fioClsSurname != 0 && c2.cls&fioClsFirst != 0:
-			return fioMatch{start: c1.start, end: c2.end, lastTok: c2.lastTok,
-				conf: fioConfPair, hint: "surname_name", surname: c1.lower}, true
-		case fioMorphPair(ctx, cls, i, c1, c2, caseBlind):
-			return fioMatch{start: c1.start, end: c2.end, lastTok: c2.lastTok,
-				conf: fioConfPairLoose, hint: "surname_name", surname: c1.lower}, true
-		}
+	c, ok := fioReadComponent(ctx, cls, j)
+	if !ok || c.cls&fioClsSurname == 0 {
+		return fioMatch{}, false
 	}
-
-	// Ветвь E. Одиночная фамилия. Заглавная буква — не украшение, а несущее
-	// свидетельство. dict.LooksLikeSurname принимает любое слово от четырёх
-	// рун, оканчивающееся на "-ов/-ев/-ин/-ых", что одновременно является
-	// родительным падежом множественного числа большой части обычной русской
-	// лексики, а два якоря ("от", "для") — среди самых частотных слов языка.
-	// Без этого теста «скидка для постоянных клиентов» и «отчёт от аудиторов»
-	// маскировались как имена, а стратегия инициалов сворачивает
-	// десятибуквенное слово в три байта — самая дорогая форма ложного
-	// срабатывания на метрике расстояния между спанами.
-	if c1.cls&fioClsAnySurname != 0 && fioRunes(c1.lower) >= 4 &&
-		fioLoneSurnameCaseOK(ctx, i, c1, caseBlind) &&
-		!fioToponymVetoed(ctx, i, c1.lower) &&
-		fioHasAnchor(ctx, i, c1.start) {
-		return fioMatch{start: c1.start, end: c1.end, lastTok: c1.lastTok,
-			conf: fioConfLone, hint: "surname", surname: c1.lower}, true
+	if !amb {
+		conf := fioConfInitials1
+		if n == 2 {
+			conf = fioConfInitials2
+		}
+		return fioMatch{
+			start: ctx.Tokens[i].Start, end: c.end, lastTok: c.lastTok,
+			conf: conf, hint: "surname_initials", surname: c.lower,
+		}, true
+	}
+	if fioAmbiguousInitialOK(ctx, i, c) {
+		return fioMatch{
+			start: ctx.Tokens[i].Start, end: c.end, lastTok: c.lastTok,
+			conf: fioConfInitialsAmb, hint: "surname_initials", surname: c.lower,
+		}, true
 	}
 	return fioMatch{}, false
+}
+
+// fioTryThreeComponents tries the three-component shape (branch B).
+func fioTryThreeComponents(cls []fioClass, c1, c2, c3 fioComp) (fioMatch, bool) {
+	if c3.cls&fioClsPatr != 0 && c1.cls&fioClsSurname != 0 && fioLoose(cls, c2) {
+		return fioMatch{start: c1.start, end: c3.end, lastTok: c3.lastTok,
+			conf: fioConfFull, hint: "full", surname: c1.lower}, true
+	}
+	if c2.cls&fioClsPatr != 0 && c3.cls&fioClsSurname != 0 && fioLoose(cls, c1) {
+		return fioMatch{start: c1.start, end: c3.end, lastTok: c3.lastTok,
+			conf: fioConfFull, hint: "full", surname: c3.lower}, true
+	}
+	return fioMatch{}, false
+}
+
+// fioTrySurnameInitials tries the surname-then-initials shape (branch C).
+func fioTrySurnameInitials(ctx *Context, c1 fioComp) (fioMatch, bool) {
+	n, last, end := fioReadInitialsAfter(ctx, c1.lastTok)
+	if n == 0 {
+		return fioMatch{}, false
+	}
+	conf := fioConfInitials1
+	if n == 2 {
+		conf = fioConfInitials2
+	}
+	return fioMatch{start: c1.start, end: end, lastTok: last,
+		conf: conf, hint: "surname_initials", surname: c1.lower}, true
+}
+
+// fioTryTwoComponents tries the two-component shape (branch D).
+func fioTryTwoComponents(ctx *Context, cls []fioClass, i int, c1, c2 fioComp, caseBlind bool) (fioMatch, bool) {
+	if c2.cls&fioClsPatr != 0 && fioLoose(cls, c1) {
+		return fioMatch{start: c1.start, end: c2.end, lastTok: c2.lastTok,
+			conf: fioConfPair, hint: "name_patronymic"}, true
+	}
+	if c1.cls&fioClsFirst != 0 && c2.cls&fioClsSurname != 0 {
+		return fioMatch{start: c1.start, end: c2.end, lastTok: c2.lastTok,
+			conf: fioConfPair, hint: "surname_name", surname: c2.lower}, true
+	}
+	if c1.cls&fioClsSurname != 0 && c2.cls&fioClsFirst != 0 {
+		return fioMatch{start: c1.start, end: c2.end, lastTok: c2.lastTok,
+			conf: fioConfPair, hint: "surname_name", surname: c1.lower}, true
+	}
+	if fioMorphPair(ctx, cls, i, c1, c2, caseBlind) {
+		return fioMatch{start: c1.start, end: c2.end, lastTok: c2.lastTok,
+			conf: fioConfPairLoose, hint: "surname_name", surname: c1.lower}, true
+	}
+	return fioMatch{}, false
+}
+
+// fioTryLoneSurname tries the lone-surname shape (branch E).
+func fioTryLoneSurname(ctx *Context, i int, c1 fioComp, caseBlind bool) (fioMatch, bool) {
+	if c1.cls&fioClsAnySurname == 0 || fioRunes(c1.lower) < 4 ||
+		!fioLoneSurnameCaseOK(ctx, i, c1, caseBlind) ||
+		fioToponymVetoed(ctx, i, c1.lower) ||
+		!fioHasAnchor(ctx, i, c1.start) {
+		return fioMatch{}, false
+	}
+	return fioMatch{start: c1.start, end: c1.end, lastTok: c1.lastTok,
+		conf: fioConfLone, hint: "surname", surname: c1.lower}, true
 }
 
 // fioLoneSurnameCaseOK: строчный путь заменяет утраченное свидетельство двумя
@@ -654,25 +708,13 @@ func fioReadInitials(ctx *Context, i int) (count, lastTok, end int, ambiguous bo
 	var letters [2]string
 	j := i
 	for count < 2 {
-		if j+1 >= len(toks) {
+		nj, ok := fioReadInitialOne(ctx, toks, j, &letters, count)
+		if !ok {
 			break
 		}
-		w := toks[j]
-		if w.Kind != text.KindWord {
-			break
-		}
-		s := ctx.Text[w.Start:w.End]
-		if !fioOneRune(s) || !fioCyrillicWord(s) {
-			break
-		}
-		dot := toks[j+1]
-		if dot.Kind != text.KindPunct || dot.Start != w.End || ctx.Text[dot.Start:dot.End] != "." {
-			break
-		}
-		letters[count] = ctx.Lower[w.Start:w.End]
 		count++
-		lastTok, end = j+1, dot.End
-		j += 2
+		lastTok, end = nj-1, toks[nj-1].End
+		j = nj
 		if j < len(toks) && toks[j].Kind == text.KindSpace && toks[j].Len() <= fioMaxGap {
 			j++
 		}
@@ -688,6 +730,29 @@ func fioReadInitials(ctx *Context, i int) (count, lastTok, end int, ambiguous bo
 		}
 	}
 	return count, lastTok, end, false
+}
+
+// fioReadInitialOne reads a single initial (one letter followed by a dot) at
+// token j. On success it stores the lowercased letter in letters[count] and
+// returns the index just past the dot; otherwise it returns j unchanged.
+func fioReadInitialOne(ctx *Context, toks []text.Token, j int, letters *[2]string, count int) (int, bool) {
+	if j+1 >= len(toks) {
+		return j, false
+	}
+	w := toks[j]
+	if w.Kind != text.KindWord {
+		return j, false
+	}
+	s := ctx.Text[w.Start:w.End]
+	if !fioOneRune(s) || !fioCyrillicWord(s) {
+		return j, false
+	}
+	dot := toks[j+1]
+	if dot.Kind != text.KindPunct || dot.Start != w.End || ctx.Text[dot.Start:dot.End] != "." {
+		return j, false
+	}
+	letters[count] = ctx.Lower[w.Start:w.End]
+	return j + 2, true
 }
 
 // fioStartsInitialRun: без этого отвергнутое сокращение «т.е.» было бы заново
@@ -1071,29 +1136,41 @@ func fioFamousWords(phrase string) bool {
 func fioSplitWords(phrase string, buf []string) (int, bool) {
 	n, start := 0, -1
 	for i, r := range phrase {
-		if !unicode.IsSpace(r) {
-			if start < 0 {
-				start = i
-			}
-			continue
-		}
-		if start >= 0 {
-			if n == len(buf) {
+		if unicode.IsSpace(r) {
+			var ok bool
+			if n, ok = fioSplitFlush(buf, n, phrase, start, i); !ok {
 				return 0, false
 			}
-			buf[n] = phrase[start:i]
-			n++
 			start = -1
+			continue
+		}
+		if start < 0 {
+			start = i
 		}
 	}
-	if start >= 0 {
-		if n == len(buf) {
-			return 0, false
-		}
-		buf[n] = phrase[start:]
-		n++
+	var ok bool
+	if n, ok = fioSplitFlush(buf, n, phrase, start, len(phrase)); !ok {
+		return 0, false
 	}
 	return n, true
+}
+
+// fioSplitFlush appends the pending word phrase[start:end] to buf, returning
+// the new count and whether it fit. A negative start means no pending word.
+func fioSplitFlush(buf []string, n int, phrase string, start, end int) (int, bool) {
+	if start < 0 {
+		return n, true
+	}
+	return fioSplitAddWord(buf, n, phrase, start, end)
+}
+
+// fioSplitAddWord appends phrase[start:end] to buf, reporting overflow.
+func fioSplitAddWord(buf []string, n int, phrase string, start, end int) (int, bool) {
+	if n == len(buf) {
+		return 0, false
+	}
+	buf[n] = phrase[start:end]
+	return n + 1, true
 }
 
 // fioFamousStem: набор обрезаемых символов — дословно ".,;:!?()«»\"".
@@ -1153,47 +1230,7 @@ func fioScanHolders(ctx *Context, out []pd.Span) []pd.Span {
 		if toks[i].Kind != text.KindWord || !fioStartsUpperLatin(ctx, toks[i]) {
 			continue
 		}
-		start, end, last, parts, full, named, blocked := toks[i].Start, toks[i].End, i, 0, 0, false, false
-		j := i
-		for parts < 3 {
-			t := toks[j]
-			if t.Kind != text.KindWord {
-				break
-			}
-			w := ctx.Text[t.Start:t.End]
-			if !fioIsUpperLatin(w) {
-				break
-			}
-			lw := ctx.Lower[t.Start:t.End]
-			if fioIsLatinNoise(lw) {
-				blocked = true
-				break
-			}
-			n := fioRunes(w)
-			if n == 1 && parts == 0 {
-				break // a stray capital letter is not the start of a name
-			}
-			if n > 1 {
-				full++
-			}
-			if dict.IsLatinName(lw) {
-				named = true
-			}
-			parts++
-			end, last = t.End, j
-			j = last + 1
-			// A middle initial may carry a dot: "IVAN I. IVANOV".
-			if n == 1 && j < len(toks) && toks[j].Kind == text.KindPunct &&
-				toks[j].Start == t.End && ctx.Text[toks[j].Start:toks[j].End] == "." {
-				end, last = toks[j].End, j
-				j++
-			}
-			if j < len(toks) && toks[j].Kind == text.KindSpace && toks[j].Len() <= fioMaxGap {
-				j++
-				continue
-			}
-			break
-		}
+		start, end, last, parts, full, named, blocked := fioHolderRun(ctx, i)
 		if blocked || parts < 2 || full < 2 {
 			i = last
 			continue
@@ -1213,6 +1250,70 @@ func fioScanHolders(ctx *Context, out []pd.Span) []pd.Span {
 		i = last
 	}
 	return out
+}
+
+// fioHolderRun reads a run of up to three Latin capitalised words starting at
+// token i, returning the consumed span and the flags that decide acceptance.
+func fioHolderRun(ctx *Context, i int) (start, end, last, parts, full int, named, blocked bool) {
+	toks := ctx.Tokens
+	start = toks[i].Start
+	st := fioHolderState{end: toks[i].End, last: i}
+	j := i
+	for st.parts < 3 {
+		nj, ok := fioHolderWord(ctx, toks, j, &st)
+		if !ok {
+			break
+		}
+		j = nj
+	}
+	return start, st.end, st.last, st.parts, st.full, st.named, st.blocked
+}
+
+// fioHolderState accumulates the state of a holder-name run.
+type fioHolderState struct {
+	end, last, parts, full int
+	named, blocked         bool
+}
+
+// fioHolderWord reads one Latin capitalised word at token j into st. It
+// returns the next token index and whether the run may continue.
+func fioHolderWord(ctx *Context, toks []text.Token, j int, st *fioHolderState) (int, bool) {
+	t := toks[j]
+	if t.Kind != text.KindWord {
+		return j, false
+	}
+	w := ctx.Text[t.Start:t.End]
+	if !fioIsUpperLatin(w) {
+		return j, false
+	}
+	lw := ctx.Lower[t.Start:t.End]
+	if fioIsLatinNoise(lw) {
+		st.blocked = true
+		return j, false
+	}
+	n := fioRunes(w)
+	if n == 1 && st.parts == 0 {
+		return j, false // a stray capital letter is not the start of a name
+	}
+	if n > 1 {
+		st.full++
+	}
+	if dict.IsLatinName(lw) {
+		st.named = true
+	}
+	st.parts++
+	st.end, st.last = t.End, j
+	j = st.last + 1
+	// A middle initial may carry a dot: "IVAN I. IVANOV".
+	if n == 1 && j < len(toks) && toks[j].Kind == text.KindPunct &&
+		toks[j].Start == t.End && ctx.Text[toks[j].Start:toks[j].End] == "." {
+		st.end, st.last = toks[j].End, j
+		j++
+	}
+	if j < len(toks) && toks[j].Kind == text.KindSpace && toks[j].Len() <= fioMaxGap {
+		return j + 1, true
+	}
+	return j, false
 }
 
 // fioHolderAnchor: окно — fioHolderWindow = 120 байт в каждую сторону; сначала
@@ -1554,33 +1655,38 @@ func fioValueAtomOK(ctx *Context, cls []fioClass, c fioComp, noCase bool) (bool,
 		return false, false
 	}
 	parts := fioValueParts(c.lower)
-	for _, p := range parts {
-		if fioRunes(p) >= 2 && fioValueBadWord(p) {
-			return false, false
-		}
-	}
-	if fioValueBadWord(c.lower) {
+	if fioValuePartsBad(parts) || fioValueBadWord(c.lower) {
 		return false, false
 	}
-	dictSeen := false
-	for _, p := range parts {
-		if fioNameForms(p) != 0 || fioLooksLikeSurname(p) || dict.IsLatinName(p) {
-			dictSeen = true
-			break
-		}
-	}
-	if !dictSeen {
-		if fioNameForms(c.lower) != 0 || fioLooksLikeSurname(c.lower) || dict.IsLatinName(c.lower) {
-			dictSeen = true
-		}
-	}
-	if dictSeen {
+	if fioValueDictSeen(parts, c.lower) {
 		return true, true
 	}
 	if !noCase && text.IsUpperFirst(ctx.Text[c.start:c.end]) && !fioValueAdjective(c.lower) {
 		return true, false
 	}
 	return false, false
+}
+
+// fioValuePartsBad reports whether any part of the atom is a word that cannot
+// be part of a name.
+func fioValuePartsBad(parts []string) bool {
+	for _, p := range parts {
+		if fioRunes(p) >= 2 && fioValueBadWord(p) {
+			return true
+		}
+	}
+	return false
+}
+
+// fioValueDictSeen reports whether the atom or any of its parts is confirmed
+// by the dictionary or morphology.
+func fioValueDictSeen(parts []string, lower string) bool {
+	for _, p := range parts {
+		if fioNameForms(p) != 0 || fioLooksLikeSurname(p) || dict.IsLatinName(p) {
+			return true
+		}
+	}
+	return fioNameForms(lower) != 0 || fioLooksLikeSurname(lower) || dict.IsLatinName(lower)
 }
 
 // fioReadValueRun читает прогон атомов, начиная с токена tok.
@@ -1596,69 +1702,92 @@ func fioReadValueRun(ctx *Context, cls []fioClass, tok int, noCase bool) (fioVal
 		if t.Kind != text.KindWord {
 			break
 		}
-		s := ctx.Text[t.Start:t.End]
-		if fioOneRune(s) && run.lastTok+1 < len(ctx.Tokens) {
-			dot := ctx.Tokens[run.lastTok+1]
-			if dot.Kind == text.KindPunct && dot.Start == t.End && ctx.Text[dot.Start:dot.End] == "." {
-				if first && !text.IsUpperFirst(s) {
-					break
-				}
-				letter := ctx.Lower[t.Start:t.End]
-				if prevInitial != "" {
-					if _, bad := fioAbbrevPair[prevInitial+"."+letter]; bad {
-						break
-					}
-				}
-				prevInitial = letter
-				run.atoms++
-				run.end = dot.End
-				run.lastTok = run.lastTok + 1
-				if !text.IsLatinWord(s) {
-					run.latinOnly = false
-				}
-				first = false
-				if run.lastTok+2 < len(ctx.Tokens) && fioIsNameGap(ctx, ctx.Tokens[run.lastTok+1]) {
-					run.lastTok += 2
-				} else {
-					break
-				}
-				continue
+		if consumed, ok, letter := fioReadValueInitial(ctx, &run, first, prevInitial); consumed {
+			if !ok {
+				break
 			}
+			prevInitial = letter
+			first = false
+			continue
 		}
-		c, ok := fioReadValueComp(ctx, cls, run.lastTok)
-		if !ok {
+		if !fioReadValueCompAtom(ctx, cls, &run, noCase) {
 			break
 		}
-		accepted, dictSeen := fioValueAtomOK(ctx, cls, c, noCase)
-		if !accepted {
-			break
-		}
-		run.atoms++
-		run.full++
-		if dictSeen {
-			run.dictSeen = true
-		}
-		if !text.IsLatinWord(c.lower) {
-			run.latinOnly = false
-		}
-		if run.full == 1 {
-			run.firstLower = c.lower
-		}
-		run.surname = c.lower
-		run.end = c.end
-		run.lastTok = c.lastTok
 		prevInitial = ""
 		first = false
-		if run.lastTok+2 < len(ctx.Tokens) && fioIsNameGap(ctx, ctx.Tokens[run.lastTok+1]) {
-			run.lastTok += 2
-		} else {
-			break
-		}
 	}
 	if run.atoms == 0 {
 		return fioValueRun{}, false
 	}
 	return run, true
+}
+
+// fioReadValueInitial attempts to consume a single initial (letter + dot) at
+// run.lastTok. It returns (consumed, ok, letter): consumed reports whether the
+// token was an initial at all; ok reports whether the run may continue; letter
+// is the lowercased initial when consumed.
+func fioReadValueInitial(ctx *Context, run *fioValueRun, first bool, prevInitial string) (consumed, ok bool, letter string) {
+	t := ctx.Tokens[run.lastTok]
+	s := ctx.Text[t.Start:t.End]
+	if !fioOneRune(s) || run.lastTok+1 >= len(ctx.Tokens) {
+		return false, true, ""
+	}
+	dot := ctx.Tokens[run.lastTok+1]
+	if dot.Kind != text.KindPunct || dot.Start != t.End || ctx.Text[dot.Start:dot.End] != "." {
+		return false, true, ""
+	}
+	if first && !text.IsUpperFirst(s) {
+		return true, false, ""
+	}
+	letter = ctx.Lower[t.Start:t.End]
+	if prevInitial != "" {
+		if _, bad := fioAbbrevPair[prevInitial+"."+letter]; bad {
+			return true, false, ""
+		}
+	}
+	run.atoms++
+	run.end = dot.End
+	run.lastTok = run.lastTok + 1
+	if !text.IsLatinWord(s) {
+		run.latinOnly = false
+	}
+	if run.lastTok+2 < len(ctx.Tokens) && fioIsNameGap(ctx, ctx.Tokens[run.lastTok+1]) {
+		run.lastTok += 2
+		return true, true, letter
+	}
+	return true, false, ""
+}
+
+// fioReadValueCompAtom reads one full component atom into run. It returns
+// false when the atom cannot be consumed and the run must stop.
+func fioReadValueCompAtom(ctx *Context, cls []fioClass, run *fioValueRun, noCase bool) bool {
+	c, ok := fioReadValueComp(ctx, cls, run.lastTok)
+	if !ok {
+		return false
+	}
+	accepted, dictSeen := fioValueAtomOK(ctx, cls, c, noCase)
+	if !accepted {
+		return false
+	}
+	run.atoms++
+	run.full++
+	if dictSeen {
+		run.dictSeen = true
+	}
+	if !text.IsLatinWord(c.lower) {
+		run.latinOnly = false
+	}
+	if run.full == 1 {
+		run.firstLower = c.lower
+	}
+	run.surname = c.lower
+	run.end = c.end
+	run.lastTok = c.lastTok
+	if run.lastTok+2 < len(ctx.Tokens) && fioIsNameGap(ctx, ctx.Tokens[run.lastTok+1]) {
+		run.lastTok += 2
+		return true
+	}
+	return false
 }
 
 // fioValueTerminated проверяет правую границу прогона для конвертов R1 и R2.
@@ -1681,14 +1810,21 @@ func fioValueTerminated(ctx *Context, run fioValueRun) bool {
 		return true
 	}
 	if s == "." {
-		if i > 0 && ctx.Tokens[i-1].Kind == text.KindPunct &&
-			ctx.Text[ctx.Tokens[i-1].Start:ctx.Tokens[i-1].End] == "." {
+		return fioValueDotTerminated(ctx, i)
+	}
+	return false
+}
+
+// fioValueDotTerminated reports whether a sentence-ending dot at token i
+// terminates the value run.
+func fioValueDotTerminated(ctx *Context, i int) bool {
+	if i > 0 && ctx.Tokens[i-1].Kind == text.KindPunct &&
+		ctx.Text[ctx.Tokens[i-1].Start:ctx.Tokens[i-1].End] == "." {
+		return true
+	}
+	if !fioAbbrevDot(ctx, i) {
+		if i+1 >= len(ctx.Tokens) || ctx.Tokens[i+1].Kind == text.KindSpace {
 			return true
-		}
-		if !fioAbbrevDot(ctx, i) {
-			if i+1 >= len(ctx.Tokens) || ctx.Tokens[i+1].Kind == text.KindSpace {
-				return true
-			}
 		}
 	}
 	return false
@@ -1874,123 +2010,176 @@ func fioScanValues(ctx *Context, out []pd.Span) []pd.Span {
 
 	// R1 — fioValueStandalone. Весь payload (после обрезки пробелов и не более
 	// одной завершающей точки) есть один прогон атомов значения.
-	if lo, _, ok := fioStandaloneBounds(ctx); ok {
-		tokIdx := ctx.TokenAt(lo)
-		if tokIdx >= 0 && ctx.Tokens[tokIdx].Kind == text.KindWord {
-			run, ok := fioReadValueRun(ctx, cls, tokIdx, noCase)
-			if ok && run.start == lo && fioValueTerminated(ctx, run) &&
-				fioValueRunAccepted(run) {
-				m := fioMatch{
-					start:      run.start,
-					end:        run.end,
-					lastTok:    run.lastTok,
-					surname:    run.surname,
-					standalone: true,
-				}
-				if !fioVetoed(ctx, tokIdx, m) && !fioValueOverlaps(out, run.start, run.end) {
-					out = fioEmitValue(out, run, fioConfStandalone)
-				}
-			}
-		}
-	}
+	out = fioValueStandalone(ctx, cls, noCase, out)
 
 	// R2 — fioValueLabel. Значение стоит сразу после ':', прошедшего
 	// fioValueLabelStart, и заканчивается концом payload, запятой или точкой
-	// конца предложения. Первый атом — непосредственно за двоеточием (ровно
-	// один пробельный токен); поиск «ближайшего слова дальше» запрещён.
+	// конца предложения.
+	out = fioValueLabel(ctx, cls, noCase, out)
+
+	// R3 — fioValueAnchored. Значение стоит сразу за сильным ролевым якорем
+	// (fioStrongAnchor) или за фразой из fioStrongPhraseAnchor, без двоеточия.
+	out = fioValueAnchored(ctx, cls, noCase, out)
+
+	return out
+}
+
+// fioValueStandalone scans the whole payload as a single value (envelope R1).
+func fioValueStandalone(ctx *Context, cls []fioClass, noCase bool, out []pd.Span) []pd.Span {
+	lo, _, ok := fioStandaloneBounds(ctx)
+	if !ok {
+		return out
+	}
+	tokIdx := ctx.TokenAt(lo)
+	if tokIdx < 0 || ctx.Tokens[tokIdx].Kind != text.KindWord {
+		return out
+	}
+	run, ok := fioReadValueRun(ctx, cls, tokIdx, noCase)
+	if !ok || run.start != lo || !fioValueTerminated(ctx, run) ||
+		!fioValueRunAccepted(run) {
+		return out
+	}
+	m := fioMatch{
+		start:      run.start,
+		end:        run.end,
+		lastTok:    run.lastTok,
+		surname:    run.surname,
+		standalone: true,
+	}
+	if fioVetoed(ctx, tokIdx, m) || fioValueOverlaps(out, run.start, run.end) {
+		return out
+	}
+	return fioEmitValue(out, run, fioConfStandalone)
+}
+
+// fioValueLabel scans values that follow a field label (envelope R2).
+func fioValueLabel(ctx *Context, cls []fioClass, noCase bool, out []pd.Span) []pd.Span {
 	for i := 0; i < len(ctx.Tokens); i++ {
-		t := ctx.Tokens[i]
-		if t.Kind != text.KindPunct || ctx.Text[t.Start:t.End] != ":" {
+		if !fioIsColon(ctx, i) {
 			continue
 		}
 		if !fioValueLabelStart(ctx, i) {
 			continue
 		}
-		startTok := i + 1
-		if startTok >= len(ctx.Tokens) || ctx.Tokens[startTok].Kind != text.KindSpace {
+		run, startTok, ok := fioValueLabelRun(ctx, cls, i, noCase)
+		if !ok {
 			continue
 		}
-		startTok++
-		if startTok >= len(ctx.Tokens) || ctx.Tokens[startTok].Kind != text.KindWord {
+		if out, ok = fioEmitValueChecked(ctx, out, run, startTok, fioConfLabel); !ok {
 			continue
 		}
-		run, ok := fioReadValueRun(ctx, cls, startTok, noCase)
-		if !ok || !fioValueTerminated(ctx, run) ||
-			!fioValueRunAcceptedFor(run, true) {
-			continue
-		}
-		m := fioMatch{
-			start:   run.start,
-			end:     run.end,
-			lastTok: fioValueLastTok(ctx, run),
-			surname: run.surname,
-		}
-		if fioVetoed(ctx, startTok, m) || fioValueOverlaps(out, run.start, run.end) {
-			continue
-		}
-		out = fioEmitValue(out, run, fioConfLabel)
 	}
+	return out
+}
 
-	// R3 — fioValueAnchored. Значение стоит сразу за сильным ролевым якорем
-	// (fioStrongAnchor) или за фразой из fioStrongPhraseAnchor, без двоеточия.
-	// Правая граница не проверяется: прогон и так обрывается на первом
-	// непринятом слове. Только fioStrongAnchor — замена на fioAnchor ломает
-	// четыре негатива («аудиторов», «постоянных», «ведущих экспертов»).
+// fioIsColon reports whether token i is a colon.
+func fioIsColon(ctx *Context, i int) bool {
+	t := ctx.Tokens[i]
+	return t.Kind == text.KindPunct && ctx.Text[t.Start:t.End] == ":"
+}
+
+// fioValueLabelRun reads the value run that follows a field label at token i.
+// It returns the run and the token index where the value starts.
+func fioValueLabelRun(ctx *Context, cls []fioClass, i int, noCase bool) (fioValueRun, int, bool) {
+	startTok := i + 1
+	if startTok >= len(ctx.Tokens) || ctx.Tokens[startTok].Kind != text.KindSpace {
+		return fioValueRun{}, 0, false
+	}
+	startTok++
+	if startTok >= len(ctx.Tokens) || ctx.Tokens[startTok].Kind != text.KindWord {
+		return fioValueRun{}, 0, false
+	}
+	run, ok := fioReadValueRun(ctx, cls, startTok, noCase)
+	if !ok || !fioValueTerminated(ctx, run) || !fioValueRunAcceptedFor(run, true) {
+		return fioValueRun{}, 0, false
+	}
+	return run, startTok, true
+}
+
+// fioEmitValueChecked emits a value span after the veto and overlap checks.
+// It returns the updated out and whether the span was emitted.
+func fioEmitValueChecked(ctx *Context, out []pd.Span, run fioValueRun, startTok int, conf float64) ([]pd.Span, bool) {
+	m := fioMatch{
+		start:   run.start,
+		end:     run.end,
+		lastTok: fioValueLastTok(ctx, run),
+		surname: run.surname,
+	}
+	if fioVetoed(ctx, startTok, m) || fioValueOverlaps(out, run.start, run.end) {
+		return out, false
+	}
+	return fioEmitValue(out, run, conf), true
+}
+
+// fioValueAnchored scans values that follow a strong role anchor (envelope R3).
+func fioValueAnchored(ctx *Context, cls []fioClass, noCase bool, out []pd.Span) []pd.Span {
 	for i := 0; i < len(ctx.Tokens); i++ {
 		t := ctx.Tokens[i]
 		if t.Kind != text.KindWord {
 			continue
 		}
-		anchored := false
-		if _, yes := fioStrongAnchor[ctx.Lower[t.Start:t.End]]; yes {
-			anchored = true
-		} else {
-			win := strings.TrimRight(fioLeftWindow(ctx, t.Start, fioStrongWindow), fioSpaceCutset)
-			for _, p := range fioStrongPhraseAnchor {
-				if strings.HasSuffix(win, p) {
-					anchored = true
-					break
-				}
-			}
-		}
-		if !anchored {
+		if !fioValueAnchoredAt(ctx, i) {
 			continue
 		}
-		startTok := i + 1
-		if startTok < len(ctx.Tokens) && ctx.Tokens[startTok].Kind == text.KindSpace {
-			startTok++
-		}
-		if startTok >= len(ctx.Tokens) || ctx.Tokens[startTok].Kind != text.KindWord {
+		run, startTok, ok := fioValueAnchoredRun(ctx, cls, i, noCase)
+		if !ok {
 			continue
 		}
-		// Пропуск ровно одного стоп-слова между якорем и значением — только
-		// если следующий за ним атом — заглавный инициал. Это держит
-		// «Отправитель документов и договоров не указан.» и «Владелец активов
-		// и вкладов пока не установлен.».
-		if dict.IsStopWord(ctx.Lower[ctx.Tokens[startTok].Start:ctx.Tokens[startTok].End]) {
-			next := startTok + 1
-			if next < len(ctx.Tokens) && ctx.Tokens[next].Kind == text.KindSpace {
-				next++
-			}
-			if next < len(ctx.Tokens) && fioIsCapitalInitial(ctx, next) {
-				startTok = next
-			}
-		}
-		run, ok := fioReadValueRun(ctx, cls, startTok, noCase)
-		if !ok || !fioValueRunAcceptedFor(run, false) {
+		if out, ok = fioEmitValueChecked(ctx, out, run, startTok, fioConfAnchored); !ok {
 			continue
 		}
-		m := fioMatch{
-			start:   run.start,
-			end:     run.end,
-			lastTok: fioValueLastTok(ctx, run),
-			surname: run.surname,
-		}
-		if fioVetoed(ctx, startTok, m) || fioValueOverlaps(out, run.start, run.end) {
-			continue
-		}
-		out = fioEmitValue(out, run, fioConfAnchored)
 	}
-
 	return out
+}
+
+// fioValueAnchoredRun reads the value run that follows a strong anchor at
+// token i. It returns the run and the token index where the value starts.
+func fioValueAnchoredRun(ctx *Context, cls []fioClass, i int, noCase bool) (fioValueRun, int, bool) {
+	startTok := i + 1
+	if startTok < len(ctx.Tokens) && ctx.Tokens[startTok].Kind == text.KindSpace {
+		startTok++
+	}
+	if startTok >= len(ctx.Tokens) || ctx.Tokens[startTok].Kind != text.KindWord {
+		return fioValueRun{}, 0, false
+	}
+	// Пропуск ровно одного стоп-слова между якорем и значением — только
+	// если следующий за ним атом — заглавный инициал.
+	startTok = fioValueSkipStopWord(ctx, startTok)
+	run, ok := fioReadValueRun(ctx, cls, startTok, noCase)
+	if !ok || !fioValueRunAcceptedFor(run, false) {
+		return fioValueRun{}, 0, false
+	}
+	return run, startTok, true
+}
+
+// fioValueAnchoredAt reports whether token i is a strong role anchor or the
+// end of a strong phrase anchor.
+func fioValueAnchoredAt(ctx *Context, i int) bool {
+	t := ctx.Tokens[i]
+	if _, yes := fioStrongAnchor[ctx.Lower[t.Start:t.End]]; yes {
+		return true
+	}
+	win := strings.TrimRight(fioLeftWindow(ctx, t.Start, fioStrongWindow), fioSpaceCutset)
+	for _, p := range fioStrongPhraseAnchor {
+		if strings.HasSuffix(win, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// fioValueSkipStopWord skips exactly one stop word between the anchor and the
+// value, but only when the following atom is a capital initial.
+func fioValueSkipStopWord(ctx *Context, startTok int) int {
+	if !dict.IsStopWord(ctx.Lower[ctx.Tokens[startTok].Start:ctx.Tokens[startTok].End]) {
+		return startTok
+	}
+	next := startTok + 1
+	if next < len(ctx.Tokens) && ctx.Tokens[next].Kind == text.KindSpace {
+		next++
+	}
+	if next < len(ctx.Tokens) && fioIsCapitalInitial(ctx, next) {
+		return next
+	}
+	return startTok
 }

@@ -339,15 +339,12 @@ func defaultTypeRules() map[string]TypeRule {
 		case pd.TypeCardHolder:
 			// Card holders are embossed in latin, so they get the latin variant.
 			r.Strategy = StrategyInitialsLatin
-		case pd.TypeCVV:
+		case pd.TypeCVV, pd.TypePIN:
 			r.Strategy = StrategyStarsAll
 			// A CVV shape (three digits) is worthless and ambiguous on its own;
-			// only next to a card number is it certainly a secret.
-			r.RequiresCompanion = []string{string(pd.TypeCardNumber)}
-		case pd.TypePIN:
-			r.Strategy = StrategyStarsAll
-			// The example from the specification: a PIN alone is not masked, a
-			// PIN together with a card number is.
+			// only next to a card number is it certainly a secret. The example
+			// from the specification: a PIN alone is not masked, a PIN together
+			// with a card number is.
 			r.RequiresCompanion = []string{string(pd.TypeCardNumber)}
 		}
 		rules[string(t)] = r
@@ -595,6 +592,34 @@ func (m *Manager) Validate(c *Config) error {
 	if c == nil {
 		return errors.New("config: nil configuration")
 	}
+	if err := validateServer(c); err != nil {
+		return err
+	}
+	if err := validateStore(c); err != nil {
+		return err
+	}
+	if err := validateLog(c); err != nil {
+		return err
+	}
+	if c.DefaultSystem == "" {
+		return errors.New("config: default_system is empty")
+	}
+	if _, ok := c.System(c.DefaultSystem); !ok {
+		return fmt.Errorf("config: default_system %q is not among the configured systems", c.DefaultSystem)
+	}
+	if len(c.Systems) == 0 {
+		return errors.New("config: no systems configured")
+	}
+	// The strategy registry is populated from init() of the mask sub-packages.
+	// While the binary under test imports only config, it can legitimately be
+	// empty, and rejecting every strategy name then would make the package
+	// untestable in isolation. So the name check is skipped when nothing has
+	// registered yet, and enforced as soon as anything has.
+	return validateSystems(c, len(mask.StrategyNames()) > 0)
+}
+
+// validateServer checks the HTTP-layer knobs.
+func validateServer(c *Config) error {
 	if strings.TrimSpace(c.Server.Addr) == "" {
 		return errors.New("config: server.addr is empty")
 	}
@@ -617,6 +642,11 @@ func (m *Manager) Validate(c *Config) error {
 	if c.Server.MaxConcurrent < 0 {
 		return errors.New("config: server.max_concurrent must not be negative")
 	}
+	return nil
+}
+
+// validateStore checks the payload_id mapping store settings.
+func validateStore(c *Config) error {
 	if c.Store.Shards <= 0 {
 		return errors.New("config: store.shards must be positive")
 	}
@@ -635,6 +665,11 @@ func (m *Manager) Validate(c *Config) error {
 	if c.Store.MaxValueBytes <= 0 {
 		return errors.New("config: store.max_value_bytes must be positive")
 	}
+	return nil
+}
+
+// validateLog checks the logging settings.
+func validateLog(c *Config) error {
 	switch c.Log.Level {
 	case "debug", "info", "warn", "error":
 	default:
@@ -648,21 +683,11 @@ func (m *Manager) Validate(c *Config) error {
 	if c.Log.SampleEvery < 0 {
 		return errors.New("config: log.sample_every must not be negative")
 	}
-	if c.DefaultSystem == "" {
-		return errors.New("config: default_system is empty")
-	}
-	if _, ok := c.System(c.DefaultSystem); !ok {
-		return fmt.Errorf("config: default_system %q is not among the configured systems", c.DefaultSystem)
-	}
-	if len(c.Systems) == 0 {
-		return errors.New("config: no systems configured")
-	}
-	// The strategy registry is populated from init() of the mask sub-packages.
-	// While the binary under test imports only config, it can legitimately be
-	// empty, and rejecting every strategy name then would make the package
-	// untestable in isolation. So the name check is skipped when nothing has
-	// registered yet, and enforced as soon as anything has.
-	checkStrategies := len(mask.StrategyNames()) > 0
+	return nil
+}
+
+// validateSystems checks every configured system and its per-type rules.
+func validateSystems(c *Config, checkStrategies bool) error {
 	for id, s := range c.Systems {
 		if s == nil {
 			return fmt.Errorf("config: system %q is null", id)
@@ -671,27 +696,35 @@ func (m *Manager) Validate(c *Config) error {
 			return fmt.Errorf("config: system key %q does not match its id %q", id, s.ID)
 		}
 		for name, r := range s.Types {
-			if !knownTypes[name] {
-				return fmt.Errorf("config: system %q: unknown PD type %q", id, name)
-			}
-			if r.MinConfidence < 0 || r.MinConfidence > 1 {
-				return fmt.Errorf("config: system %q type %q: min_confidence %v is outside [0,1]", id, name, r.MinConfidence)
-			}
-			for _, comp := range r.RequiresCompanion {
-				if !knownTypes[comp] {
-					return fmt.Errorf("config: system %q type %q: unknown companion type %q", id, name, comp)
-				}
-			}
-			if !r.Enabled {
-				continue
-			}
-			if strings.TrimSpace(r.Strategy) == "" {
-				return fmt.Errorf("config: system %q type %q: strategy is empty", id, name)
-			}
-			if checkStrategies && mask.Lookup(r.Strategy) == nil {
-				return fmt.Errorf("config: system %q type %q: unknown mask strategy %q", id, name, r.Strategy)
+			if err := validateTypeRule(id, name, r, checkStrategies); err != nil {
+				return err
 			}
 		}
+	}
+	return nil
+}
+
+// validateTypeRule checks one per-type rule of a system.
+func validateTypeRule(id, name string, r TypeRule, checkStrategies bool) error {
+	if !knownTypes[name] {
+		return fmt.Errorf("config: system %q: unknown PD type %q", id, name)
+	}
+	if r.MinConfidence < 0 || r.MinConfidence > 1 {
+		return fmt.Errorf("config: system %q type %q: min_confidence %v is outside [0,1]", id, name, r.MinConfidence)
+	}
+	for _, comp := range r.RequiresCompanion {
+		if !knownTypes[comp] {
+			return fmt.Errorf("config: system %q type %q: unknown companion type %q", id, name, comp)
+		}
+	}
+	if !r.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(r.Strategy) == "" {
+		return fmt.Errorf("config: system %q type %q: strategy is empty", id, name)
+	}
+	if checkStrategies && mask.Lookup(r.Strategy) == nil {
+		return fmt.Errorf("config: system %q type %q: unknown mask strategy %q", id, name, r.Strategy)
 	}
 	return nil
 }

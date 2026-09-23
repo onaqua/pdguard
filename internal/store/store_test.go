@@ -278,20 +278,7 @@ func TestConcurrentPutGet(t *testing.T) {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			for i := 0; i < perWork; i++ {
-				id := fmt.Sprintf("w%d-%d", w, i)
-				orig := fmt.Sprintf("payload %d %d", w, i)
-				s.Put(id, Entry{Original: orig, Masked: "pa*****", Types: []string{"FIO"}})
-				got, ok := s.Get(id)
-				if !ok {
-					t.Errorf("%s: lost right after Put", id)
-					return
-				}
-				if got.Original != orig {
-					t.Errorf("%s: got %q want %q", id, got.Original, orig)
-					return
-				}
-			}
+			concurrentPutGetWorker(t, s, w, perWork)
 		}(w)
 	}
 	wg.Wait()
@@ -301,6 +288,33 @@ func TestConcurrentPutGet(t *testing.T) {
 	}
 	// Every entry must still be readable after the storm: this is the exact
 	// property the demasking half of the score depends on.
+	assertAllEntriesReadable(t, s, workers, perWork)
+}
+
+// concurrentPutGetWorker writes and immediately reads back one worker's share
+// of entries.
+func concurrentPutGetWorker(t *testing.T, s Store, w, perWork int) {
+	t.Helper()
+	for i := 0; i < perWork; i++ {
+		id := fmt.Sprintf("w%d-%d", w, i)
+		orig := fmt.Sprintf("payload %d %d", w, i)
+		s.Put(id, Entry{Original: orig, Masked: "pa*****", Types: []string{"FIO"}})
+		got, ok := s.Get(id)
+		if !ok {
+			t.Errorf("%s: lost right after Put", id)
+			return
+		}
+		if got.Original != orig {
+			t.Errorf("%s: got %q want %q", id, got.Original, orig)
+			return
+		}
+	}
+}
+
+// assertAllEntriesReadable checks that every entry written by the concurrent
+// storm is still present and intact.
+func assertAllEntriesReadable(t *testing.T, s Store, workers, perWork int) {
+	t.Helper()
 	for w := 0; w < workers; w++ {
 		for i := 0; i < perWork; i++ {
 			id := fmt.Sprintf("w%d-%d", w, i)

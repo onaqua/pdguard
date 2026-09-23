@@ -50,26 +50,36 @@ func readSet(name string) set {
 func readIndexed(name string) map[string]int {
 	m := make(map[string]int, 64)
 	for _, line := range lines(name) {
-		key, num, ok := strings.Cut(line, "\t")
+		key, num, ok := splitIndexed(line)
 		if !ok {
-			key, num, ok = strings.Cut(line, " ")
-			if !ok {
-				continue
-			}
+			continue
 		}
-		n := 0
-		for _, c := range strings.TrimSpace(num) {
-			if c < '0' || c > '9' {
-				n = -1
-				break
-			}
-			n = n*10 + int(c-'0')
-		}
-		if n > 0 {
+		if n := parseIndexedNum(num); n > 0 {
 			m[strings.TrimSpace(key)] = n
 		}
 	}
 	return m
+}
+
+// splitIndexed splits a "value<TAB>number" (or "value number") line.
+func splitIndexed(line string) (key, num string, ok bool) {
+	key, num, ok = strings.Cut(line, "\t")
+	if ok {
+		return key, num, true
+	}
+	return strings.Cut(line, " ")
+}
+
+// parseIndexedNum parses a decimal number, returning -1 for a non-numeric one.
+func parseIndexedNum(num string) int {
+	n := 0
+	for _, c := range strings.TrimSpace(num) {
+		if c < '0' || c > '9' {
+			return -1
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
 }
 
 var (
@@ -113,32 +123,46 @@ func load() {
 		months = readIndexed("data/months.txt")
 		ordinals = readIndexed("data/ordinals.txt")
 
-		famousLast = make(set, len(famous))
-		famousWords = make(set, len(famous)*3)
-		famousSets = make(set, len(famous))
-		for full := range famous {
-			parts := strings.Fields(full)
-			for _, part := range parts {
-				famousWords[part] = struct{}{}
-				if len([]rune(part)) < 4 {
-					continue
-				}
-				if _, ok := surnames[part]; ok {
-					continue
-				}
-				if _, ok := firstNames[part]; ok {
-					continue
-				}
-				if _, ok := patronymics[part]; ok {
-					continue
-				}
-				famousLast[part] = struct{}{}
-			}
-			famousSets[sortedKey(parts)] = struct{}{}
-		}
-
+		buildFamousIndexes()
 		buildCityForms()
 	})
+}
+
+// buildFamousIndexes fills the famous-word and famous-surname sets from the
+// famous-people list.
+func buildFamousIndexes() {
+	famousLast = make(set, len(famous))
+	famousWords = make(set, len(famous)*3)
+	famousSets = make(set, len(famous))
+	for full := range famous {
+		parts := strings.Fields(full)
+		for _, part := range parts {
+			famousWords[part] = struct{}{}
+			if isFamousSurnameWord(part) {
+				famousLast[part] = struct{}{}
+			}
+		}
+		famousSets[sortedKey(parts)] = struct{}{}
+	}
+}
+
+// isFamousSurnameWord reports whether a word of a famous name is long enough
+// and not an ordinary given name, surname or patronymic, so it can identify a
+// public figure on its own.
+func isFamousSurnameWord(part string) bool {
+	if len([]rune(part)) < 4 {
+		return false
+	}
+	if _, ok := surnames[part]; ok {
+		return false
+	}
+	if _, ok := firstNames[part]; ok {
+		return false
+	}
+	if _, ok := patronymics[part]; ok {
+		return false
+	}
+	return true
 }
 
 // sortedKey joins words in sorted order so that two spellings of one name that

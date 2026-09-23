@@ -149,43 +149,60 @@ func Resolve(spans []pd.Span) []pd.Span {
 		return spans
 	}
 	sort.SliceStable(spans, func(i, j int) bool {
-		a, b := spans[i], spans[j]
-		if a.Len() != b.Len() {
-			return a.Len() > b.Len()
-		}
-		if pa, pb := a.Type.Priority(), b.Type.Priority(); pa != pb {
-			return pa > pb
-		}
-		if a.Conf != b.Conf {
-			return a.Conf > b.Conf
-		}
-		return a.Start < b.Start
+		return resolveLess(spans[i], spans[j])
 	})
+	kept := resolveFilter(spans)
+	sort.Slice(kept, func(i, j int) bool { return kept[i].Start < kept[j].Start })
+	return kept
+}
 
+// resolveLess orders two spans by the resolution rule: longer first, then
+// higher type priority, then higher confidence, then earlier position.
+func resolveLess(a, b pd.Span) bool {
+	if a.Len() != b.Len() {
+		return a.Len() > b.Len()
+	}
+	if pa, pb := a.Type.Priority(), b.Type.Priority(); pa != pb {
+		return pa > pb
+	}
+	if a.Conf != b.Conf {
+		return a.Conf > b.Conf
+	}
+	return a.Start < b.Start
+}
+
+// resolveFilter drops spans that overlap an already kept one, keeping the
+// first claimant of each byte.
+func resolveFilter(spans []pd.Span) []pd.Span {
 	kept := make([]pd.Span, 0, len(spans))
 	if len(spans) < resolveOccupancyMin {
-		for _, s := range spans {
-			clash := false
-			for _, k := range kept {
-				if s.Overlaps(k) {
-					clash = true
-					break
-				}
-			}
-			if !clash {
-				kept = append(kept, s)
-			}
-		}
-	} else {
-		occ := newOccupancy(spans)
-		for _, s := range spans {
-			if occ.free(s.Start, s.End) {
-				occ.take(s.Start, s.End)
-				kept = append(kept, s)
-			}
+		return resolvePairwise(spans, kept)
+	}
+	occ := newOccupancy(spans)
+	for _, s := range spans {
+		if occ.free(s.Start, s.End) {
+			occ.take(s.Start, s.End)
+			kept = append(kept, s)
 		}
 	}
-	sort.Slice(kept, func(i, j int) bool { return kept[i].Start < kept[j].Start })
+	return kept
+}
+
+// resolvePairwise drops overlapping spans by comparing each candidate against
+// everything kept so far.
+func resolvePairwise(spans, kept []pd.Span) []pd.Span {
+	for _, s := range spans {
+		clash := false
+		for _, k := range kept {
+			if s.Overlaps(k) {
+				clash = true
+				break
+			}
+		}
+		if !clash {
+			kept = append(kept, s)
+		}
+	}
 	return kept
 }
 

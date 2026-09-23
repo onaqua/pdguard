@@ -385,13 +385,8 @@ func (s *finScan) cardWindow(i int) (int, float64, bool) {
 		return 0, 0, false
 	}
 	// Pass 1: arithmetic + card grouping (no cue word needed).
-	for j := hi; j >= lo; j-- {
-		if s.allSame(i, j) || s.usedOverlap(s.groups[i].start, s.groups[j].end) {
-			continue
-		}
-		if s.grouped(i, j) && s.luhn(i, j) {
-			return j, finConfLuhn, true
-		}
+	if j, ok := s.cardPass1(i, lo, hi); ok {
+		return j, finConfLuhn, true
 	}
 	// Gates for passes 2 and 3: everything below needs a cue word, except a
 	// bare payload, which may only use the card shape of pass 3.
@@ -405,16 +400,45 @@ func (s *finScan) cardWindow(i int) (int, float64, bool) {
 	}
 	// Pass 2: Luhn at any grouping (cue already present).
 	if cued {
-		for j := hi; j >= lo; j-- {
-			if s.allSame(i, j) || s.usedOverlap(s.groups[i].start, s.groups[j].end) {
-				continue
-			}
-			if s.luhn(i, j) {
-				return j, finConfLuhn, true
-			}
+		if j, ok := s.cardPass2(i, lo, hi); ok {
+			return j, finConfLuhn, true
 		}
 	}
 	// Pass 3: card grouping without Luhn.
+	if j, ok := s.cardPass3(i, lo, hi, cued); ok {
+		return j, finConfCardAnchor, true
+	}
+	return 0, 0, false
+}
+
+// cardPass1 runs the arithmetic + card grouping pass over the window.
+func (s *finScan) cardPass1(i, lo, hi int) (int, bool) {
+	for j := hi; j >= lo; j-- {
+		if s.allSame(i, j) || s.usedOverlap(s.groups[i].start, s.groups[j].end) {
+			continue
+		}
+		if s.grouped(i, j) && s.luhn(i, j) {
+			return j, true
+		}
+	}
+	return 0, false
+}
+
+// cardPass2 runs the Luhn-at-any-grouping pass over the window.
+func (s *finScan) cardPass2(i, lo, hi int) (int, bool) {
+	for j := hi; j >= lo; j-- {
+		if s.allSame(i, j) || s.usedOverlap(s.groups[i].start, s.groups[j].end) {
+			continue
+		}
+		if s.luhn(i, j) {
+			return j, true
+		}
+	}
+	return 0, false
+}
+
+// cardPass3 runs the card-grouping-without-Luhn pass over the window.
+func (s *finScan) cardPass3(i, lo, hi int, cued bool) (int, bool) {
 	for j := hi; j >= lo; j-- {
 		if s.allSame(i, j) || s.usedOverlap(s.groups[i].start, s.groups[j].end) {
 			continue
@@ -423,10 +447,10 @@ func (s *finScan) cardWindow(i int) (int, float64, bool) {
 			if !cued && !finCardBareShape(s, i, j) {
 				continue
 			}
-			return j, finConfCardAnchor, true
+			return j, true
 		}
 	}
-	return 0, 0, false
+	return 0, false
 }
 
 // finCardBareShape reports whether a bare window has a real card shape.
@@ -501,31 +525,37 @@ func (s *finScan) grouped(i, j int) bool {
 // scanAccount finds 20-digit runs next to a cue word.
 func (s *finScan) scanAccount() {
 	for i := 0; i < len(s.groups); {
-		hit, n := -1, 0
-		for j := i; j < len(s.groups); j++ {
-			n += s.groups[j].end - s.groups[j].start
-			if n > finAccountDigits {
-				break
-			}
-			if n != finAccountDigits {
-				continue
-			}
-			if s.usedOverlap(s.groups[i].start, s.groups[j].end) {
-				continue
-			}
-			if s.cue(&s.accountCue, finAccountProbes) &&
-				finCueLeft(s.lower, s.groups[i].start, finAccountAnchors, finAnchorWindow) {
-				hit = j
-				break
-			}
-		}
-		if hit < 0 {
+		hit, ok := s.accountHit(i)
+		if !ok {
 			i++
 			continue
 		}
 		s.emit(s.groups[i].start, s.groups[hit].end, pd.TypeBankAccount, finConfAccount, "account")
 		i = hit + 1
 	}
+}
+
+// accountHit finds the first 20-digit window from group i that a cue word
+// vouches for, returning the index of its last group.
+func (s *finScan) accountHit(i int) (int, bool) {
+	n := 0
+	for j := i; j < len(s.groups); j++ {
+		n += s.groups[j].end - s.groups[j].start
+		if n > finAccountDigits {
+			break
+		}
+		if n != finAccountDigits {
+			continue
+		}
+		if s.usedOverlap(s.groups[i].start, s.groups[j].end) {
+			continue
+		}
+		if s.cue(&s.accountCue, finAccountProbes) &&
+			finCueLeft(s.lower, s.groups[i].start, finAccountAnchors, finAnchorWindow) {
+			return j, true
+		}
+	}
+	return -1, false
 }
 
 // scanINN finds single-group INNs, then delegates to scanINNGrouped.
@@ -543,19 +573,8 @@ func (s *finScan) scanINN() {
 		if finAllSame(d) {
 			continue
 		}
-		cued := s.innCued(g.start)
-		valid := finINNChecksum(d)
-		var conf float64
-		switch {
-		case valid && cued:
-			conf = finConfINNChecked
-		case valid && n == 12:
-			conf = finConfINN12
-		case cued:
-			conf = finConfINNAnchor
-		case s.bare && valid && finINNRegion(d):
-			conf = finConfINNBare
-		default:
+		conf, ok := s.innConf(d, n, s.innCued(g.start), finINNChecksum(d))
+		if !ok {
 			continue
 		}
 		hint := "organization"
@@ -567,6 +586,21 @@ func (s *finScan) scanINN() {
 	s.scanINNGrouped()
 }
 
+// innConf picks the confidence for a single-group INN, or reports no match.
+func (s *finScan) innConf(d string, n int, cued, valid bool) (float64, bool) {
+	switch {
+	case valid && cued:
+		return finConfINNChecked, true
+	case valid && n == 12:
+		return finConfINN12, true
+	case cued:
+		return finConfINNAnchor, true
+	case s.bare && valid && finINNRegion(d):
+		return finConfINNBare, true
+	}
+	return 0, false
+}
+
 // scanINNGrouped finds INNs split across groups, next to a cue word.
 func (s *finScan) scanINNGrouped() {
 	if len(s.groups) < 2 {
@@ -576,36 +610,8 @@ func (s *finScan) scanINNGrouped() {
 		return
 	}
 	for i := 0; i < len(s.groups); {
-		hit, conf, n := -1, 0.0, 0
-		for j := i; j < len(s.groups); j++ {
-			n += s.groups[j].end - s.groups[j].start
-			if n > finINNMaxDigits {
-				break
-			}
-			if j == i || (n != 10 && n != finINNMaxDigits) {
-				continue
-			}
-			if s.allSame(i, j) || s.usedOverlap(s.groups[i].start, s.groups[j].end) {
-				continue
-			}
-			cued := s.cue(&s.innCue, finINNProbes) &&
-				finCueLeft(s.lower, s.groups[i].start, finINNAnchors, finAnchorWindow)
-			ok := s.innChecksum(i, j)
-			switch {
-			case cued && ok:
-				conf = finConfINNChecked
-			case cued:
-				conf = finConfINNAnchor
-			case s.bare && ok && n == finINNMaxDigits &&
-				i == 0 && j == len(s.groups)-1:
-				conf = finConfINNBareGrouped
-			default:
-				continue
-			}
-			hit = j
-			break
-		}
-		if hit < 0 {
+		hit, conf, n, ok := s.innGroupedHit(i)
+		if !ok {
 			i++
 			continue
 		}
@@ -616,6 +622,46 @@ func (s *finScan) scanINNGrouped() {
 		s.emit(s.groups[i].start, s.groups[hit].end, pd.TypeINN, conf, hint)
 		i = hit + 1
 	}
+}
+
+// innGroupedHit finds the first grouped INN window from group i, returning the
+// index of its last group, its confidence and its digit count.
+func (s *finScan) innGroupedHit(i int) (hit int, conf float64, n int, ok bool) {
+	hit, conf, n = -1, 0, 0
+	for j := i; j < len(s.groups); j++ {
+		n += s.groups[j].end - s.groups[j].start
+		if n > finINNMaxDigits {
+			break
+		}
+		if j == i || (n != 10 && n != finINNMaxDigits) {
+			continue
+		}
+		if s.allSame(i, j) || s.usedOverlap(s.groups[i].start, s.groups[j].end) {
+			continue
+		}
+		c, ok := s.innGroupedConf(i, j, n, s.innChecksum(i, j))
+		if !ok {
+			continue
+		}
+		return j, c, n, true
+	}
+	return -1, 0, 0, false
+}
+
+// innGroupedConf picks the confidence for a grouped INN window.
+func (s *finScan) innGroupedConf(i, j, n int, ok bool) (float64, bool) {
+	cued := s.cue(&s.innCue, finINNProbes) &&
+		finCueLeft(s.lower, s.groups[i].start, finINNAnchors, finAnchorWindow)
+	switch {
+	case cued && ok:
+		return finConfINNChecked, true
+	case cued:
+		return finConfINNAnchor, true
+	case s.bare && ok && n == finINNMaxDigits &&
+		i == 0 && j == len(s.groups)-1:
+		return finConfINNBareGrouped, true
+	}
+	return 0, false
 }
 
 // innCued reports whether a cue word vouches for the INN at offset off.
@@ -900,7 +946,20 @@ func finIBANChecksum(s string) bool {
 	if finAlnumLen(s) < 5 {
 		return false
 	}
-	rem, skip := 0, 4
+	rem := 0
+	if !finIBANFoldBody(s, &rem) {
+		return false
+	}
+	if !finIBANFoldHead(s, &rem) {
+		return false
+	}
+	return rem == 1
+}
+
+// finIBANFoldBody folds every character of s except its first four non-space
+// characters into the running mod-97 remainder.
+func finIBANFoldBody(s string, rem *int) bool {
+	skip := 4
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		if c == ' ' {
@@ -910,24 +969,27 @@ func finIBANChecksum(s string) bool {
 			skip--
 			continue
 		}
-		if !finIBANFold(&rem, c) {
+		if !finIBANFold(rem, c) {
 			return false
 		}
 	}
-	if skip > 0 {
-		return false // fewer than five characters: not an IBAN at all
-	}
+	return skip == 0
+}
+
+// finIBANFoldHead folds the first four non-space characters of s into the
+// running mod-97 remainder, completing the IBAN reordering.
+func finIBANFoldHead(s string, rem *int) bool {
 	for i, left := 0, 4; i < len(s) && left > 0; i++ {
 		c := s[i]
 		if c == ' ' {
 			continue
 		}
 		left--
-		if !finIBANFold(&rem, c) {
+		if !finIBANFold(rem, c) {
 			return false
 		}
 	}
-	return rem == 1
+	return true
 }
 
 // finIBANFold folds one character into the running mod-97 remainder.

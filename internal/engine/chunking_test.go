@@ -111,15 +111,7 @@ func TestChunkBoundaryEntity(t *testing.T) {
 					continue // this placement is not cut through; nothing to prove
 				}
 				cuts = append(cuts, cut-start)
-
-				res := mustProcess(t, e, "boundary", txt)
-				if strings.Contains(res.Output, entity) {
-					t.Errorf("cut at +%d inside the entity: %q came back unmasked", cut-start, entity)
-				}
-				if n := strings.Count(res.Output, want); n != 1 {
-					t.Errorf("cut at +%d inside the entity: masked form %q appears %d times, want 1",
-						cut-start, want, n)
-				}
+				assertBoundaryMask(t, e, entity, want, txt, cut-start)
 			}
 
 			if len(cuts) < 2 {
@@ -127,6 +119,20 @@ func TestChunkBoundaryEntity(t *testing.T) {
 			}
 			t.Logf("cut offsets exercised inside %q: %v", entity, cuts)
 		})
+	}
+}
+
+// assertBoundaryMask checks that an entity cut through by the seam is masked
+// exactly once.
+func assertBoundaryMask(t *testing.T, e *Engine, entity, want, txt string, cut int) {
+	t.Helper()
+	res := mustProcess(t, e, "boundary", txt)
+	if strings.Contains(res.Output, entity) {
+		t.Errorf("cut at +%d inside the entity: %q came back unmasked", cut, entity)
+	}
+	if n := strings.Count(res.Output, want); n != 1 {
+		t.Errorf("cut at +%d inside the entity: masked form %q appears %d times, want 1",
+			cut, want, n)
 	}
 }
 
@@ -145,42 +151,49 @@ func TestChunkOverlapNoDoubleMask(t *testing.T) {
 	for _, entity := range chunkEntities {
 		entity := entity
 		t.Run(entity, func(t *testing.T) {
-			want := maskedForm(t, e, entity)
-
-			// Place the entity so it ENDS shortly before the cut and starts
-			// well inside the overlap window: the previous chunk sees it in
-			// full, and so does the next one, which begins chunkOverlap bytes
-			// earlier.
-			start := chunkLimit - 300
-			end := start + len(entity)
-			txt := fillTo(start) + entity + "." + spaceFree(chunkLimit-64-end-1) + " " + spaceFree(4096) + fillTo(chunkLimit/2)
-
-			cut := firstCutIn(txt, end, chunkLimit)
-			if cut < 0 || cut-chunkOverlap > start {
-				t.Fatalf("placement is wrong: entity [%d,%d), cut %d, overlap starts at %d",
-					start, end, cut, cut-chunkOverlap)
-			}
-
-			res := mustProcess(t, e, "overlap", txt)
-			if n := strings.Count(res.Output, want); n != 1 {
-				t.Fatalf("entity inside the overlap window: masked form %q appears %d times, want exactly 1",
-					want, n)
-			}
-			if strings.Contains(res.Output, entity) {
-				t.Fatalf("entity inside the overlap window came back unmasked")
-			}
-			// One span, masked once: the output differs from the input by
-			// exactly the length that one replacement changes.
-			if got, want := len(res.Output)-len(txt), len(maskedForm(t, e, entity))-len(entity); got != want {
-				t.Fatalf("length delta = %d, want %d: the span was masked more than once", got, want)
-			}
-
-			// And the mapping still restores byte for byte.
-			back := mustProcess(t, e, "overlap", res.Output)
-			if back.Output != txt {
-				t.Fatal("reverse step did not restore the text byte for byte")
-			}
+			assertOverlapMask(t, e, entity)
 		})
+	}
+}
+
+// assertOverlapMask checks that an entity sitting in the overlap window is
+// masked exactly once and still restores byte for byte.
+func assertOverlapMask(t *testing.T, e *Engine, entity string) {
+	t.Helper()
+	want := maskedForm(t, e, entity)
+
+	// Place the entity so it ENDS shortly before the cut and starts
+	// well inside the overlap window: the previous chunk sees it in
+	// full, and so does the next one, which begins chunkOverlap bytes
+	// earlier.
+	start := chunkLimit - 300
+	end := start + len(entity)
+	txt := fillTo(start) + entity + "." + spaceFree(chunkLimit-64-end-1) + " " + spaceFree(4096) + fillTo(chunkLimit/2)
+
+	cut := firstCutIn(txt, end, chunkLimit)
+	if cut < 0 || cut-chunkOverlap > start {
+		t.Fatalf("placement is wrong: entity [%d,%d), cut %d, overlap starts at %d",
+			start, end, cut, cut-chunkOverlap)
+	}
+
+	res := mustProcess(t, e, "overlap", txt)
+	if n := strings.Count(res.Output, want); n != 1 {
+		t.Fatalf("entity inside the overlap window: masked form %q appears %d times, want exactly 1",
+			want, n)
+	}
+	if strings.Contains(res.Output, entity) {
+		t.Fatalf("entity inside the overlap window came back unmasked")
+	}
+	// One span, masked once: the output differs from the input by
+	// exactly the length that one replacement changes.
+	if got, want := len(res.Output)-len(txt), len(maskedForm(t, e, entity))-len(entity); got != want {
+		t.Fatalf("length delta = %d, want %d: the span was masked more than once", got, want)
+	}
+
+	// And the mapping still restores byte for byte.
+	back := mustProcess(t, e, "overlap", res.Output)
+	if back.Output != txt {
+		t.Fatal("reverse step did not restore the text byte for byte")
 	}
 }
 

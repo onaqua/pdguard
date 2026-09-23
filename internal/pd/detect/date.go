@@ -155,6 +155,17 @@ const (
 // parser off the hot path.
 const dateWordYearMarker = "тысяч"
 
+// datePhraseBirth* are the birth-date field labels shared by the anchor and
+// label vocabularies. They are named so the three lists that carry them stay
+// in sync.
+const (
+	datePhraseBirthDate    = "дата рождения"
+	datePhraseBirthDateAcc = "дату рождения"
+	datePhraseBirthDateGen = "даты рождения"
+	datePhraseBirthYear    = "год рождения"
+	datePhraseBirthYearGen = "года рождения"
+)
+
 // dateCurrentYear is the plausibility horizon for every date in the service.
 //
 // It is sampled ONCE, at package initialisation, rather than per request: the
@@ -179,8 +190,8 @@ const (
 // cannot fire inside "другой" or "график".
 var (
 	dateBirthAnchors = []string{
-		"дата рождения", "дату рождения", "даты рождения", "дата рожд",
-		"год рождения", "года рождения", "рождения", "рожден", "рождён",
+		datePhraseBirthDate, datePhraseBirthDateAcc, datePhraseBirthDateGen, "дата рожд",
+		datePhraseBirthYear, datePhraseBirthYearGen, "рождения", "рожден", "рождён",
 		"родился", "родилась", "родившийся", "родившаяся",
 		"д.р.", "д. р.", "др", "г.р.", "г. р.", "гр", "род.", "рожд.",
 		"date of birth", "birth date", "birthday", "dob", "born",
@@ -194,8 +205,8 @@ var (
 	// birth date: "12.05.1990 г.р.", "12.05.1990 (дата рождения)". The longer
 	// spellings come first so that a prefix test reports the most specific one.
 	dateRightBirthAnchors = []string{
-		"дата рождения", "дату рождения", "даты рождения",
-		"года рождения", "год рождения", "рождения", "г.р.", "г. р.", "г.р",
+		datePhraseBirthDate, datePhraseBirthDateAcc, datePhraseBirthDateGen,
+		datePhraseBirthYearGen, datePhraseBirthYear, "рождения", "г.р.", "г. р.", "г.р",
 	}
 	// dateNegativeAnchors mark a number that only looks like a date. The
 	// specification names amounts, contract numbers, versions and IPs
@@ -249,8 +260,8 @@ var (
 	// дате/год/года" + "рождения/выдачи". ОДНОСЛОВНЫХ элементов тут быть не
 	// должно; добавление любого — отдельное решение с разбором негативов.
 	dateBirthLabels = []string{
-		"дата рождения", "дату рождения", "даты рождения", "дате рождения",
-		"дата рожд", "год рождения", "года рождения",
+		datePhraseBirthDate, datePhraseBirthDateAcc, datePhraseBirthDateGen, "дате рождения",
+		"дата рожд", datePhraseBirthYear, datePhraseBirthYearGen,
 	}
 	dateIssueLabels = []string{
 		"дата выдачи", "дату выдачи", "даты выдачи", "дате выдачи",
@@ -318,6 +329,51 @@ func dateAppend(out []pd.Span, sp pd.Span) []pd.Span {
 	return append(out, sp)
 }
 
+// dateNumericAt parses one numeric date candidate starting at token i. It
+// returns the span, the index of the last token consumed, and whether a date
+// was found.
+func (d dateDetector) dateNumericAt(ctx *Context, i, now int) (pd.Span, int, bool) {
+	s := ctx.Lower
+	toks := ctx.Tokens
+	g1 := toks[i]
+	if g1.Kind != text.KindNumber || (g1.Len() > 2 && g1.Len() != 4) {
+		return pd.Span{}, 0, false
+	}
+	sepA, j, ok := dateSepAt(s, toks, i+1)
+	if !ok {
+		return pd.Span{}, 0, false
+	}
+	g2 := toks[j]
+	if g2.Kind != text.KindNumber || g2.Len() > 2 {
+		return pd.Span{}, 0, false
+	}
+	sepB, k, ok := dateSepAt(s, toks, j+1)
+	if !ok || sepB != sepA {
+		return pd.Span{}, 0, false
+	}
+	yEnd, ok := dateYearEnd(s, toks[k])
+	if !ok {
+		return pd.Span{}, 0, false
+	}
+	if dateChained(s, toks, i, k, sepA) {
+		return pd.Span{}, 0, false
+	}
+	day, mon, year, hint, amb, ok := dateOrder(
+		s[g1.Start:g1.End],
+		s[g2.Start:g2.End],
+		s[toks[k].Start:yEnd],
+		sepA, now,
+	)
+	if !ok || !validCalendar(day, mon, year) {
+		return pd.Span{}, 0, false
+	}
+	sp, ok := d.classify(ctx, g1.Start, yEnd, year, now, hint, amb)
+	if !ok {
+		return pd.Span{}, 0, false
+	}
+	return sp, k, true
+}
+
 // numeric handles 12.05.1990, 12/05/1990, 12-05-1990, 12 05 1990, 12.05.90,
 // 1990-05-12 (ISO), 1990.12.05 and 1990.25.12 in one pass over the tokens.
 //
@@ -325,42 +381,9 @@ func dateAppend(out []pd.Span, sp pd.Span) []pd.Span {
 // which is what admits "15  /  07  /  1988": a form filled by hand pads its
 // separators, and the three parts are still one date.
 func (d dateDetector) numeric(ctx *Context, out []pd.Span, now int) []pd.Span {
-	s := ctx.Lower
 	toks := ctx.Tokens
 	for i := 0; i+4 < len(toks); i++ {
-		g1 := toks[i]
-		if g1.Kind != text.KindNumber || (g1.Len() > 2 && g1.Len() != 4) {
-			continue
-		}
-		sepA, j, ok := dateSepAt(s, toks, i+1)
-		if !ok {
-			continue
-		}
-		g2 := toks[j]
-		if g2.Kind != text.KindNumber || g2.Len() > 2 {
-			continue
-		}
-		sepB, k, ok := dateSepAt(s, toks, j+1)
-		if !ok || sepB != sepA {
-			continue
-		}
-		yEnd, ok := dateYearEnd(s, toks[k])
-		if !ok {
-			continue
-		}
-		if dateChained(s, toks, i, k, sepA) {
-			continue
-		}
-		day, mon, year, hint, amb, ok := dateOrder(
-			s[g1.Start:g1.End],
-			s[g2.Start:g2.End],
-			s[toks[k].Start:yEnd],
-			sepA, now,
-		)
-		if !ok || !validCalendar(day, mon, year) {
-			continue
-		}
-		sp, ok := d.classify(ctx, g1.Start, yEnd, year, now, hint, amb)
+		sp, k, ok := d.dateNumericAt(ctx, i, now)
 		if !ok {
 			continue
 		}
@@ -370,51 +393,70 @@ func (d dateDetector) numeric(ctx *Context, out []pd.Span, now int) []pd.Span {
 	return out
 }
 
+// dateDayMonthOrder resolves a day/month pair from two numbers, both <= 12 or
+// one above 12.
+func dateDayMonthOrder(n1, n2 int) (day, mon int, ok bool) {
+	switch {
+	case n1 > 12 && n2 <= 12:
+		return n1, n2, true
+	case n2 > 12 && n1 <= 12:
+		return n2, n1, true
+	case n1 <= 12 && n2 <= 12:
+		return n1, n2, true
+	}
+	return 0, 0, false
+}
+
+// dateNumDayMonthAt parses one "15 03" / "15/03" candidate starting at token i.
+// It returns the span, the index of the last token consumed, and whether a
+// date was found.
+func (d dateDetector) dateNumDayMonthAt(ctx *Context, i int) (pd.Span, int, bool) {
+	s := ctx.Lower
+	toks := ctx.Tokens
+	g1 := toks[i]
+	if g1.Kind != text.KindNumber || g1.Len() > 2 {
+		return pd.Span{}, 0, false
+	}
+	sep, j, ok := dateSepAt(s, toks, i+1)
+	if !ok {
+		return pd.Span{}, 0, false
+	}
+	g2 := toks[j]
+	if g2.Kind != text.KindNumber || g2.Len() > 2 {
+		return pd.Span{}, 0, false
+	}
+	if !dateDayMonthIsolated(s, toks, i, j, sep) {
+		return pd.Span{}, 0, false
+	}
+	n1, e1 := strconv.Atoi(s[g1.Start:g1.End])
+	n2, e2 := strconv.Atoi(s[g2.Start:g2.End])
+	if e1 != nil || e2 != nil {
+		return pd.Span{}, 0, false
+	}
+	day, mon, ok := dateDayMonthOrder(n1, n2)
+	if !ok {
+		return pd.Span{}, 0, false
+	}
+	if day < 1 || day > maxDaysInMonth(mon) {
+		return pd.Span{}, 0, false
+	}
+	if dateDayMonthInIdentifier(ctx, g1.Start, g2.End) {
+		return pd.Span{}, 0, false
+	}
+	sp, ok := d.classifyNoYear(ctx, g1.Start, g2.End, "dm")
+	if !ok {
+		return pd.Span{}, 0, false
+	}
+	return sp, j, true
+}
+
 // numDayMonth находит "15 03" и "15/03" — день и месяц, у которых года нет.
 // Форма сама по себе не несёт никаких признаков даты (это два числа), поэтому
 // ЯВНЫЙ якорь обязателен и проверяется ПЕРВЫМ, как в compact.
 func (d dateDetector) numDayMonth(ctx *Context, out []pd.Span) []pd.Span {
-	s := ctx.Lower
 	toks := ctx.Tokens
 	for i := 0; i+2 < len(toks); i++ {
-		g1 := toks[i]
-		if g1.Kind != text.KindNumber || g1.Len() > 2 {
-			continue
-		}
-		sep, j, ok := dateSepAt(s, toks, i+1)
-		if !ok {
-			continue
-		}
-		g2 := toks[j]
-		if g2.Kind != text.KindNumber || g2.Len() > 2 {
-			continue
-		}
-		if !dateDayMonthIsolated(s, toks, i, j, sep) {
-			continue
-		}
-		n1, e1 := strconv.Atoi(s[g1.Start:g1.End])
-		n2, e2 := strconv.Atoi(s[g2.Start:g2.End])
-		if e1 != nil || e2 != nil {
-			continue
-		}
-		var day, mon int
-		switch {
-		case n1 > 12 && n2 <= 12:
-			day, mon = n1, n2
-		case n2 > 12 && n1 <= 12:
-			day, mon = n2, n1
-		case n1 <= 12 && n2 <= 12:
-			day, mon = n1, n2
-		default:
-			continue
-		}
-		if day < 1 || day > maxDaysInMonth(mon) {
-			continue
-		}
-		if dateDayMonthInIdentifier(ctx, g1.Start, g2.End) {
-			continue
-		}
-		sp, ok := d.classifyNoYear(ctx, g1.Start, g2.End, "dm")
+		sp, j, ok := d.dateNumDayMonthAt(ctx, i)
 		if !ok {
 			continue
 		}
@@ -422,6 +464,42 @@ func (d dateDetector) numDayMonth(ctx *Context, out []pd.Span) []pd.Span {
 		i = j
 	}
 	return out
+}
+
+// dateDayMonthIsolatedBack reports whether the token before first is a digit
+// or a separator that continues the numeric record.
+func dateDayMonthIsolatedBack(s string, toks []text.Token, first int, sep byte) bool {
+	p := datePadBack(s, toks, first-1)
+	if p < 0 {
+		return true
+	}
+	if dateDigitPrefix(s, toks[p]) > 0 {
+		return false
+	}
+	if dateSepBlocks(s, toks, p, sep) {
+		if q := datePadBack(s, toks, p-1); q >= 0 && dateDigitPrefix(s, toks[q]) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// dateDayMonthIsolatedFwd reports whether the token after last is a digit or a
+// separator that continues the numeric record.
+func dateDayMonthIsolatedFwd(s string, toks []text.Token, last int, sep byte) bool {
+	n := datePadFwd(s, toks, last+1)
+	if n < 0 {
+		return true
+	}
+	if dateDigitPrefix(s, toks[n]) > 0 {
+		return false
+	}
+	if dateSepBlocks(s, toks, n, sep) {
+		if m := datePadFwd(s, toks, n+1); m >= 0 && dateDigitPrefix(s, toks[m]) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // dateDayMonthIsolated — несущая проверка правила numDayMonth. Без неё
@@ -443,27 +521,7 @@ func (d dateDetector) numDayMonth(ctx *Context, out []pd.Span) []pd.Span {
 //     ЛЮБОЙ из четырёх разделителей, а не только через пробел: "15 07.1988"
 //     — это одна запись, а не пара плюс год.
 func dateDayMonthIsolated(s string, toks []text.Token, first, last int, sep byte) bool {
-	if p := datePadBack(s, toks, first-1); p >= 0 {
-		if dateDigitPrefix(s, toks[p]) > 0 {
-			return false
-		}
-		if dateSepBlocks(s, toks, p, sep) {
-			if q := datePadBack(s, toks, p-1); q >= 0 && dateDigitPrefix(s, toks[q]) > 0 {
-				return false
-			}
-		}
-	}
-	if n := datePadFwd(s, toks, last+1); n >= 0 {
-		if dateDigitPrefix(s, toks[n]) > 0 {
-			return false
-		}
-		if dateSepBlocks(s, toks, n, sep) {
-			if m := datePadFwd(s, toks, n+1); m >= 0 && dateDigitPrefix(s, toks[m]) > 0 {
-				return false
-			}
-		}
-	}
-	return true
+	return dateDayMonthIsolatedBack(s, toks, first, sep) && dateDayMonthIsolatedFwd(s, toks, last, sep)
 }
 
 // dateSepBlocks reports whether the token at index i is a separator that
@@ -554,66 +612,100 @@ func (d dateDetector) classifyNoYear(ctx *Context, start, end int, hint string) 
 		Conf: dateConfNoYear, Src: "date", Hint: hint}, true
 }
 
+// dateTextMonth resolves the month word of a textual date. A word of at least
+// six bytes is looked up in the month dictionary; shorter words are accepted
+// only as a placeholder ("15 Mмм 1990"). ok is false when the word is neither.
+func dateTextMonth(s string, w text.Token) (mon int, ok bool) {
+	if w.Len() >= 6 {
+		if m, found := monthNumber(s[w.Start:w.End]); found {
+			return m, true
+		}
+	}
+	if dateMonthPlaceholder[s[w.Start:w.End]] {
+		return 0, true
+	}
+	return 0, false
+}
+
+// dateTextYear greedily reads the year that may follow a textual month. It
+// returns the byte offset the date ends at, the year value, the index of the
+// last token consumed, and whether the date survives at all. When no year is
+// present the no-year defaults are returned with ok=true; ok is false only when
+// a spelled-out year is found but its anchor is missing.
+func dateTextYear(ctx *Context, j, k int, sepA byte, g1Start, now int, gate *int8) (end, year, last int, ok bool) {
+	s := ctx.Lower
+	toks := ctx.Tokens
+	end, year, last = toks[j].End, 0, j
+	if k < len(toks) && dateIsDot(s, toks[k]) {
+		k++ // сокращение месяца: "12 янв. 1990"
+	}
+	if sepB, k2, ok := dateWordSepAt(s, toks, k); ok && sepB == sepA {
+		if y, yEnd, lastTok, word, ok := dateTailYear(ctx, k2, now, gate); ok {
+			if word && !dateWordYearAllowed(ctx, g1Start, yEnd) {
+				return 0, 0, 0, false
+			}
+			return yEnd, y, lastTok, true
+		}
+	}
+	return end, year, last, true
+}
+
+// dateTextualAt parses one textual date candidate starting at token i. It
+// returns the span, the index of the last token consumed, and whether a date
+// was found.
+func (d dateDetector) dateTextualAt(ctx *Context, i, now int, gate *int8) (pd.Span, int, bool) {
+	s := ctx.Lower
+	toks := ctx.Tokens
+	g1 := toks[i]
+	if g1.Kind != text.KindNumber || g1.Len() > 2 {
+		return pd.Span{}, 0, false
+	}
+	sepA, j, ok := dateWordSepAt(s, toks, i+1)
+	if !ok {
+		return pd.Span{}, 0, false
+	}
+	w := toks[j]
+	if w.Kind != text.KindWord || w.Len() < 3 || w.Len() > 20 {
+		return pd.Span{}, 0, false
+	}
+	mon, ok := dateTextMonth(s, w)
+	if !ok {
+		return pd.Span{}, 0, false
+	}
+	day, err := strconv.Atoi(s[g1.Start:g1.End])
+	if err != nil {
+		return pd.Span{}, 0, false
+	}
+	// Год необязателен. Разбор жадный: сначала пробуем полную форму, и
+	// только если она не сложилась, откатываемся к форме без года.
+	end, year, last, ok := dateTextYear(ctx, j, j+1, sepA, g1.Start, now, gate)
+	if !ok {
+		return pd.Span{}, 0, false
+	}
+	if !dateValidDayMonth(day, mon, year, now) {
+		return pd.Span{}, 0, false
+	}
+	var sp pd.Span
+	if year != 0 {
+		sp, ok = d.classify(ctx, g1.Start, end, year, now, "text", false)
+	} else {
+		sp, ok = d.classifyNoYear(ctx, g1.Start, end, "dm")
+	}
+	if !ok {
+		return pd.Span{}, 0, false
+	}
+	return sp, last, true
+}
+
 // textual handles "12 мая 1990" and its abbreviated and oblique-case forms
 // ("12 янв. 90", "12 январём 1990"). The month word is validated against the
 // dictionary, which carries every case form, so an arbitrary word here costs
 // one hash lookup and nothing else. The trailing "года"/"г." is intentionally
 // not part of the match — see the file comment.
 func (d dateDetector) textual(ctx *Context, out []pd.Span, now int, gate *int8) []pd.Span {
-	s := ctx.Lower
 	toks := ctx.Tokens
 	for i := 0; i+2 < len(toks); i++ {
-		g1 := toks[i]
-		if g1.Kind != text.KindNumber || g1.Len() > 2 {
-			continue
-		}
-		sepA, j, ok := dateWordSepAt(s, toks, i+1)
-		if !ok {
-			continue
-		}
-		w := toks[j]
-		if w.Kind != text.KindWord || w.Len() < 3 || w.Len() > 20 {
-			continue
-		}
-		mon, ok := 0, false
-		if w.Len() >= 6 { // настоящий месяц: минимум "янв" = 6 байт
-			mon, ok = monthNumber(s[w.Start:w.End])
-		}
-		if !ok {
-			if !dateMonthPlaceholder[s[w.Start:w.End]] {
-				continue
-			}
-			mon = 0 // месяц неизвестен: заглушка формы
-		}
-		day, err := strconv.Atoi(s[g1.Start:g1.End])
-		if err != nil {
-			continue
-		}
-		// Год необязателен. Разбор жадный: сначала пробуем полную форму, и
-		// только если она не сложилась, откатываемся к форме без года.
-		end, year, hint := w.End, 0, "text" // форма без года
-		last := j                           // индекс токена месяца, не ноль
-		k := j + 1                          // разделитель после месяца
-		if k < len(toks) && dateIsDot(s, toks[k]) {
-			k++ // сокращение месяца: "12 янв. 1990"
-		}
-		if sepB, k2, ok := dateWordSepAt(s, toks, k); ok && sepB == sepA {
-			if y, yEnd, lastTok, word, ok := dateTailYear(ctx, k2, now, gate); ok {
-				if word && !dateWordYearAllowed(ctx, g1.Start, yEnd) {
-					continue
-				}
-				end, year, last = yEnd, y, lastTok
-			}
-		}
-		if !dateValidDayMonth(day, mon, year, now) {
-			continue
-		}
-		var sp pd.Span
-		if year != 0 {
-			sp, ok = d.classify(ctx, g1.Start, end, year, now, hint, false)
-		} else {
-			sp, ok = d.classifyNoYear(ctx, g1.Start, end, "dm")
-		}
+		sp, last, ok := d.dateTextualAt(ctx, i, now, gate)
 		if !ok {
 			continue
 		}
@@ -646,6 +738,41 @@ func dateValidDayMonth(day, mon, year, now int) bool {
 	return day <= maxDaysInMonth(mon)
 }
 
+// dateTokenWordAt parses one spelled-out day candidate ("двенадцатое мая 1990")
+// starting at token i. It returns the span, the index of the last token
+// consumed, and whether a date was found.
+func (d dateDetector) dateTokenWordAt(ctx *Context, i, now int, gate *int8) (pd.Span, int, bool) {
+	toks := ctx.Tokens
+	day, after, ok := ordinalAt(ctx, i)
+	if !ok {
+		return pd.Span{}, 0, false
+	}
+	j := skipSpace(toks, after)
+	if j < 0 || toks[j].Kind != text.KindWord {
+		return pd.Span{}, 0, false
+	}
+	mon, ok := monthNumber(ctx.Lower[toks[j].Start:toks[j].End])
+	if !ok {
+		return pd.Span{}, 0, false
+	}
+	k := skipSpace(toks, j+1)
+	if k < 0 {
+		return pd.Span{}, 0, false
+	}
+	year, yEnd, last, word, ok := dateTailYear(ctx, k, now, gate)
+	if !ok || !validCalendar(day, mon, year) {
+		return pd.Span{}, 0, false
+	}
+	if word && !dateWordYearAllowed(ctx, toks[i].Start, yEnd) {
+		return pd.Span{}, 0, false
+	}
+	sp, ok := d.classify(ctx, toks[i].Start, yEnd, year, now, "words", false)
+	if !ok {
+		return pd.Span{}, 0, false
+	}
+	return sp, last, true
+}
+
 // tokenScan carries the two shapes that are driven by whole tokens rather than
 // by a separator pattern, so that they share a single walk over ctx.Tokens:
 //
@@ -668,30 +795,7 @@ func (d dateDetector) tokenScan(ctx *Context, out []pd.Span, now int, gate *int8
 		if t.Kind != text.KindWord {
 			continue
 		}
-		day, after, ok := ordinalAt(ctx, i)
-		if !ok {
-			continue
-		}
-		j := skipSpace(toks, after)
-		if j < 0 || toks[j].Kind != text.KindWord {
-			continue
-		}
-		mon, ok := monthNumber(ctx.Lower[toks[j].Start:toks[j].End])
-		if !ok {
-			continue
-		}
-		k := skipSpace(toks, j+1)
-		if k < 0 {
-			continue
-		}
-		year, yEnd, last, word, ok := dateTailYear(ctx, k, now, gate)
-		if !ok || !validCalendar(day, mon, year) {
-			continue
-		}
-		if word && !dateWordYearAllowed(ctx, toks[i].Start, yEnd) {
-			continue
-		}
-		sp, ok := d.classify(ctx, toks[i].Start, yEnd, year, now, "words", false)
+		sp, last, ok := d.dateTokenWordAt(ctx, i, now, gate)
 		if !ok {
 			continue
 		}
@@ -722,6 +826,26 @@ func (d dateDetector) compact(ctx *Context, t text.Token, now int) (pd.Span, boo
 	return pd.Span{}, false
 }
 
+// dateBirthYearToken extracts the year range from a token that may be a plain
+// four-digit number or an alphanumeric "1990г". It returns the byte offset the
+// year ends at, whether the "г" was glued, and whether the token is a year.
+func dateBirthYearToken(s string, t text.Token) (yEnd int, glued, ok bool) {
+	switch t.Kind {
+	case text.KindNumber:
+		if t.Len() != 4 {
+			return 0, false, false
+		}
+		return t.End, false, true
+	case text.KindAlnum:
+		n := dateDigitPrefix(s, t)
+		if n != 4 || s[t.Start+n:t.End] != "г" {
+			return 0, false, false
+		}
+		return t.Start + n, true, true
+	}
+	return 0, false, false
+}
+
 // birthYear covers the single construction in which a bare year is personal
 // data: "1990 года рождения", "1990 г.р.", "1990г.р.". The span is the year
 // alone; "года рождения" stays untouched.
@@ -733,21 +857,8 @@ func (d dateDetector) birthYear(ctx *Context, out []pd.Span, now int) []pd.Span 
 	toks := ctx.Tokens
 	for i := 0; i < len(toks); i++ {
 		t := toks[i]
-		var yEnd int
-		glued := false
-		switch t.Kind {
-		case text.KindNumber:
-			if t.Len() != 4 {
-				continue
-			}
-			yEnd = t.End
-		case text.KindAlnum:
-			n := dateDigitPrefix(s, t)
-			if n != 4 || s[t.Start+n:t.End] != "г" {
-				continue
-			}
-			yEnd, glued = t.Start+n, true
-		default:
+		yEnd, glued, ok := dateBirthYearToken(s, t)
+		if !ok {
 			continue
 		}
 		if !dateBirthYearTail(s, toks, i+1, glued) {
@@ -813,6 +924,39 @@ func (d dateDetector) classify(ctx *Context, start, end, year, now int, hint str
 	return pd.Span{Start: start, End: end, Type: typ, Conf: conf, Src: "date", Hint: hint}, true
 }
 
+// datePropagateOne types a single bare span by borrowing the type of the
+// nearest anchored birth date, if any. It returns whether the span was updated.
+func datePropagateOne(ctx *Context, spans []pd.Span, i int) bool {
+	best, bestGap := -1, dateLinkWindow+1
+	for j := range spans {
+		if spans[j].Conf < dateConfStrongFloor-dateConfEps {
+			continue
+		}
+		if spans[j].Hint == "dm" {
+			continue // частичная дата донором не бывает: у неё нет года,
+			// а вместе с ним нет и возрастного теста, которым
+			// datePropagate оправдывает заимствование типа
+		}
+		if gap := dateGap(spans[i], spans[j]); gap < bestGap {
+			best, bestGap = j, gap
+		}
+	}
+	if best < 0 || spans[best].Type != pd.TypeBirthDate {
+		return false
+	}
+	from, to := dateGapRange(spans[i], spans[best])
+	if dateSentenceBreak(ctx, from, to) {
+		return false
+	}
+	conf := dateConfPropagated
+	if spans[i].Conf < dateConfBare-dateConfEps {
+		conf -= dateAmbiguityPenalty
+	}
+	spans[i].Type = pd.TypeBirthDate
+	spans[i].Conf = conf
+	return true
+}
+
 // datePropagate is the second pass that closes the gap this detector was
 // reported for. On
 //
@@ -864,33 +1008,7 @@ func datePropagate(ctx *Context, spans []pd.Span) {
 		if spans[i].Conf > dateConfBare+dateConfEps {
 			continue
 		}
-		best, bestGap := -1, dateLinkWindow+1
-		for j := range spans {
-			if spans[j].Conf < dateConfStrongFloor-dateConfEps {
-				continue
-			}
-			if spans[j].Hint == "dm" {
-				continue // частичная дата донором не бывает: у неё нет года,
-				// а вместе с ним нет и возрастного теста, которым
-				// datePropagate оправдывает заимствование типа
-			}
-			if gap := dateGap(spans[i], spans[j]); gap < bestGap {
-				best, bestGap = j, gap
-			}
-		}
-		if best < 0 || spans[best].Type != pd.TypeBirthDate {
-			continue
-		}
-		from, to := dateGapRange(spans[i], spans[best])
-		if dateSentenceBreak(ctx, from, to) {
-			continue
-		}
-		conf := dateConfPropagated
-		if spans[i].Conf < dateConfBare-dateConfEps {
-			conf -= dateAmbiguityPenalty
-		}
-		spans[i].Type = pd.TypeBirthDate
-		spans[i].Conf = conf
+		datePropagateOne(ctx, spans, i)
 	}
 }
 
@@ -917,6 +1035,19 @@ func dateGapRange(a, b pd.Span) (int, int) {
 	return 0, 0
 }
 
+// dateSentenceDotBreak reports whether the dot at index i in s ends a
+// sentence: it must be followed by whitespace and then a capital letter.
+func dateSentenceDotBreak(s, txt string, i int) bool {
+	j := i + 1
+	if j >= len(s) || (s[j] != ' ' && s[j] != '\t') {
+		return false
+	}
+	for j < len(s) && (s[j] == ' ' || s[j] == '\t') {
+		j++
+	}
+	return j < len(s) && text.IsUpperFirst(txt[j:])
+}
+
 // dateSentenceBreak reports whether [from,to) crosses a sentence boundary.
 //
 // The dot is the hard case, because a date is full of them: "12.05.1990." ends
@@ -935,14 +1066,7 @@ func dateSentenceBreak(ctx *Context, from, to int) bool {
 		case '\n', '\r', '!', '?':
 			return true
 		case '.':
-			j := i + 1
-			if j >= len(s) || (s[j] != ' ' && s[j] != '\t') {
-				continue
-			}
-			for j < len(s) && (s[j] == ' ' || s[j] == '\t') {
-				j++
-			}
-			if j < len(s) && text.IsUpperFirst(ctx.Text[j:]) {
+			if dateSentenceDotBreak(s, ctx.Text, i) {
 				return true
 			}
 		}
@@ -970,6 +1094,36 @@ func leftAnchor(lower string, start int) dateAnchor {
 		}
 	}
 	return kind
+}
+
+// dateCleanRunEmDash reports whether the bytes at i are an em/en dash
+// (U+2014 / U+2013), a predicate break.
+func dateCleanRunEmDash(lower string, to, i int) bool {
+	return i+2 < to && lower[i+1] == 0x80 && (lower[i+2] == 0x94 || lower[i+2] == 0x93)
+}
+
+// dateCleanRunDash reports whether the dash at index i is a predicate break: a
+// hyphen surrounded by spaces.
+func dateCleanRunDash(lower string, from, to, i int) bool {
+	return i > from && i+1 < to && lower[i-1] == ' ' && lower[i+1] == ' '
+}
+
+// dateCleanRunByte reports whether the byte at index i is a predicate or
+// sentence break that invalidates the run.
+func dateCleanRunByte(lower string, from, to, i int) bool {
+	switch c := lower[i]; {
+	case c >= '0' && c <= '9':
+		return true
+	case c == '.' || c == ';' || c == '!' || c == '?' || c == '\n' || c == '\r':
+		return true
+	case c == ',' || c == '(' || c == ')':
+		return true
+	case c == 0xE2:
+		return dateCleanRunEmDash(lower, to, i)
+	case c == '-':
+		return dateCleanRunDash(lower, from, to, i)
+	}
+	return false
 }
 
 // dateCleanRun сообщает, что lower[from:to) не содержит ни одной цифры, ни
@@ -1017,22 +1171,8 @@ func dateCleanRun(lower string, from, to int) bool {
 		return false
 	}
 	for i := from; i < to; i++ {
-		switch c := lower[i]; {
-		case c >= '0' && c <= '9':
+		if dateCleanRunByte(lower, from, to, i) {
 			return false
-		case c == '.' || c == ';' || c == '!' || c == '?' || c == '\n' || c == '\r':
-			return false
-		case c == ',' || c == '(' || c == ')':
-			return false
-		case c == 0xE2 && i+2 < to && lower[i+1] == 0x80 && (lower[i+2] == 0x94 || lower[i+2] == 0x93):
-			// '—' (U+2014) и '–' (U+2013) — тире как разрыв предикации.
-			return false
-		case c == '-':
-			// Дефис внутри слова ("финансово-кредитной") разрывом не
-			// считается; тире в окружении пробелов — разрыв предикации.
-			if i > from && i+1 < to && lower[i-1] == ' ' && lower[i+1] == ' ' {
-				return false
-			}
 		}
 	}
 	return true
@@ -1118,6 +1258,36 @@ func hasRightBirthAnchor(lower string, end int) bool {
 	return false
 }
 
+// dateNegativeHead reports whether the text just before the date ends in a
+// currency or number marker.
+func dateNegativeHead(lower string, from, start int) bool {
+	head := strings.TrimRight(lower[from:start], " \t")
+	if head == "" {
+		return false
+	}
+	switch head[len(head)-1] {
+	case '$', '%':
+		return true
+	}
+	return strings.HasSuffix(head, "№") || strings.HasSuffix(head, "₽")
+}
+
+// dateNegativeTail reports whether the text just after the date starts with a
+// unit that marks it as a number.
+func dateNegativeTail(lower string, end int) bool {
+	to := end + 8
+	if to > len(lower) {
+		to = len(lower)
+	}
+	tail := strings.TrimLeft(lower[end:to], " \t")
+	for _, n := range dateRightNegatives {
+		if strings.HasPrefix(tail, n) {
+			return true
+		}
+	}
+	return false
+}
+
 // hasNegativeContext suppresses numbers that merely look like dates. It runs
 // only when no positive anchor was found, so an explicit "выдан" always wins
 // over a stray "договор" earlier in the sentence.
@@ -1131,26 +1301,20 @@ func hasNegativeContext(lower string, start, end int) bool {
 			return true
 		}
 	}
-	if head := strings.TrimRight(lower[from:start], " \t"); head != "" {
-		switch head[len(head)-1] {
-		case '$', '%':
-			return true
-		}
-		if strings.HasSuffix(head, "№") || strings.HasSuffix(head, "₽") {
-			return true
-		}
+	if dateNegativeHead(lower, from, start) {
+		return true
 	}
-	to := end + 8
-	if to > len(lower) {
-		to = len(lower)
+	return dateNegativeTail(lower, end)
+}
+
+// nameBeforeWord reports whether the word token t looks like a Russian name
+// component.
+func nameBeforeWord(ctx *Context, t text.Token) bool {
+	w := ctx.Lower[t.Start:t.End]
+	if !text.IsCyrillicWord(w) || !text.IsUpperFirst(ctx.Text[t.Start:t.End]) {
+		return false
 	}
-	tail := strings.TrimLeft(lower[end:to], " \t")
-	for _, n := range dateRightNegatives {
-		if strings.HasPrefix(tail, n) {
-			return true
-		}
-	}
-	return false
+	return dict.IsPatronymic(w) || dict.IsSurname(w) || dict.IsFirstName(w) || dict.LooksLikeSurname(w)
 }
 
 // nameBefore reports whether the tokens just before off look like a Russian
@@ -1170,11 +1334,7 @@ func nameBefore(ctx *Context, off int) bool {
 			continue
 		case text.KindWord:
 			words++
-			w := ctx.Lower[t.Start:t.End]
-			if !text.IsCyrillicWord(w) || !text.IsUpperFirst(ctx.Text[t.Start:t.End]) {
-				return false
-			}
-			if dict.IsPatronymic(w) || dict.IsSurname(w) || dict.IsFirstName(w) || dict.LooksLikeSurname(w) {
+			if nameBeforeWord(ctx, t) {
 				return true
 			}
 		case text.KindPunct:
@@ -1194,6 +1354,51 @@ func datePunctSep(s string, t text.Token) bool {
 	}
 	c := s[t.Start]
 	return c == '.' || c == '/' || c == '-'
+}
+
+// dateSepSingleSpace reports whether the space token at j is a whitespace
+// separator: a single space not followed by a punctuation separator. It
+// returns the index of the first token after the space.
+func dateSepSingleSpace(s string, toks []text.Token, j int) (next int, ok bool) {
+	if j+1 >= len(toks) {
+		return 0, false
+	}
+	if !datePunctSep(s, toks[j+1]) {
+		return j + 1, true
+	}
+	return 0, false
+}
+
+// dateSepLeadSpace consumes the optional padding whitespace before an explicit
+// separator. It returns the index of the first non-space token, whether the
+// padding was valid, and whether the whitespace itself is the separator (a
+// single space not followed by a punctuation separator).
+func dateSepLeadSpace(s string, toks []text.Token, j int) (next int, ok, spaceSep bool) {
+	if j >= len(toks) || toks[j].Kind != text.KindSpace {
+		return j, true, false
+	}
+	if !dateInlineSpace(s, toks[j]) || toks[j].Len() > dateSepPad {
+		return 0, false, false
+	}
+	if toks[j].Len() == 1 && s[toks[j].Start] == ' ' {
+		if next, ok := dateSepSingleSpace(s, toks, j); ok {
+			return next, true, true
+		}
+	}
+	return j + 1, true, false
+}
+
+// dateSepTrailSpace consumes the optional padding whitespace after an explicit
+// separator. It returns the index of the first non-space token and whether the
+// padding was valid.
+func dateSepTrailSpace(s string, toks []text.Token, j int) (int, bool) {
+	if j < len(toks) && toks[j].Kind == text.KindSpace {
+		if !dateInlineSpace(s, toks[j]) || toks[j].Len() > dateSepPad {
+			return 0, false
+		}
+		j++
+	}
+	return j, true
 }
 
 // dateSepAt matches the separator that stands between two groups of a numeric
@@ -1217,30 +1422,21 @@ func datePunctSep(s string, t text.Token) bool {
 // A newline never pads a separator: dateInlineSpace rejects it, which is what
 // stops the last number of one table row from joining the first of the next.
 func dateSepAt(s string, toks []text.Token, j int) (sep byte, next int, ok bool) {
-	if j < len(toks) && toks[j].Kind == text.KindSpace {
-		if !dateInlineSpace(s, toks[j]) || toks[j].Len() > dateSepPad {
-			return 0, 0, false
-		}
-		if toks[j].Len() == 1 && s[toks[j].Start] == ' ' {
-			if j+1 >= len(toks) {
-				return 0, 0, false
-			}
-			if !datePunctSep(s, toks[j+1]) {
-				return ' ', j + 1, true
-			}
-		}
-		j++
+	next, ok, spaceSep := dateSepLeadSpace(s, toks, j)
+	if !ok {
+		return 0, 0, false
 	}
+	if spaceSep {
+		return ' ', next, true
+	}
+	j = next
 	if j >= len(toks) || !datePunctSep(s, toks[j]) {
 		return 0, 0, false
 	}
 	sep = s[toks[j].Start]
-	j++
-	if j < len(toks) && toks[j].Kind == text.KindSpace {
-		if !dateInlineSpace(s, toks[j]) || toks[j].Len() > dateSepPad {
-			return 0, 0, false
-		}
-		j++
+	j, ok = dateSepTrailSpace(s, toks, j+1)
+	if !ok {
+		return 0, 0, false
 	}
 	if j >= len(toks) {
 		return 0, 0, false
@@ -1396,29 +1592,26 @@ func dateSkipInline(s string, toks []text.Token, i int) int {
 	return i
 }
 
-// dateBirthYearTail reports whether the tokens from i spell one of the two
-// suffixes that make a bare year personal data: "года рождения" or "г.р.".
-// glued is true when the "г" was already fused into the year token by the
-// tokenizer ("1990г.р."), so it must not be looked for again.
-func dateBirthYearTail(s string, toks []text.Token, i int, glued bool) bool {
-	if !glued {
-		i = dateSkipInline(s, toks, i)
+// dateBirthYearWordTail checks the "года рождения" suffix that follows the
+// year token. It returns true when the suffix matched.
+func dateBirthYearWordTail(s string, toks []text.Token, i int) bool {
+	i = dateSkipInline(s, toks, i)
+	if i >= len(toks) || toks[i].Kind != text.KindWord {
+		return false
+	}
+	w := s[toks[i].Start:toks[i].End]
+	if isYearWord(w) {
+		i = dateSkipInline(s, toks, i+1)
 		if i >= len(toks) || toks[i].Kind != text.KindWord {
 			return false
 		}
-		w := s[toks[i].Start:toks[i].End]
-		if isYearWord(w) {
-			i = dateSkipInline(s, toks, i+1)
-			if i >= len(toks) || toks[i].Kind != text.KindWord {
-				return false
-			}
-			return strings.HasPrefix(s[toks[i].Start:toks[i].End], "рожд")
-		}
-		if w != "г" {
-			return false
-		}
-		i++
+		return strings.HasPrefix(s[toks[i].Start:toks[i].End], "рожд")
 	}
+	return false
+}
+
+// dateBirthYearDotTail checks the "г.р." suffix that follows the year token.
+func dateBirthYearDotTail(s string, toks []text.Token, i int) bool {
 	if i >= len(toks) || !dateIsDot(s, toks[i]) {
 		return false
 	}
@@ -1429,6 +1622,27 @@ func dateBirthYearTail(s string, toks []text.Token, i int, glued bool) bool {
 	return s[toks[i].Start:toks[i].End] == "р"
 }
 
+// dateBirthYearTail reports whether the tokens from i spell one of the two
+// suffixes that make a bare year personal data: "года рождения" or "г.р.".
+// glued is true when the "г" was already fused into the year token by the
+// tokenizer ("1990г.р."), so it must not be looked for again.
+func dateBirthYearTail(s string, toks []text.Token, i int, glued bool) bool {
+	if !glued {
+		if dateBirthYearWordTail(s, toks, i) {
+			return true
+		}
+		i = dateSkipInline(s, toks, i)
+		if i >= len(toks) || toks[i].Kind != text.KindWord {
+			return false
+		}
+		if s[toks[i].Start:toks[i].End] != "г" {
+			return false
+		}
+		i++
+	}
+	return dateBirthYearDotTail(s, toks, i)
+}
+
 // isYearWord lists the case forms of "год" that precede "рождения". The set is
 // closed on purpose: a prefix test would accept "годовщина".
 func isYearWord(w string) bool {
@@ -1437,6 +1651,34 @@ func isYearWord(w string) bool {
 		return true
 	}
 	return false
+}
+
+// dateOrderYearLast orders the day and month when the year is the trailing
+// group ("12.05.1990").
+func dateOrderYearLast(n1, n2, year int) (day, month, y int, hint string, ambiguous, ok bool) {
+	switch {
+	case n1 > 12 && n2 <= 12:
+		return n1, n2, year, "dmy", false, true
+	case n2 > 12 && n1 <= 12:
+		return n2, n1, year, "mdy", false, true
+	case n1 <= 12 && n2 <= 12:
+		return n1, n2, year, "dmy", true, true
+	}
+	return 0, 0, 0, "", false, false
+}
+
+// dateOrderYearFirst orders the day and month when the year is the leading
+// group (ISO-style "1990-05-12").
+func dateOrderYearFirst(n2, n3, year int, sep byte) (day, month, y int, hint string, ambiguous, ok bool) {
+	switch {
+	case n2 > 12 && n3 <= 12:
+		return n2, n3, year, "ydm", false, true
+	case n3 > 12 && n2 <= 12:
+		return n3, n2, year, "ymd", false, true
+	case n2 <= 12 && n3 <= 12:
+		return n3, n2, year, "ymd", sep != '-', true
+	}
+	return 0, 0, 0, "", false, false
 }
 
 // dateOrder decides which of the three numeric groups is the day, the month
@@ -1468,27 +1710,11 @@ func dateOrder(g1, g2, g3 string, sep byte, now int) (day, month, year int, hint
 		if !ok {
 			return 0, 0, 0, "", false, false
 		}
-		switch {
-		case n1 > 12 && n2 <= 12:
-			return n1, n2, year, "dmy", false, true
-		case n2 > 12 && n1 <= 12:
-			return n2, n1, year, "mdy", false, true
-		case n1 <= 12 && n2 <= 12:
-			return n1, n2, year, "dmy", true, true
-		}
-		return 0, 0, 0, "", false, false
+		return dateOrderYearLast(n1, n2, year)
 	default:
 		return 0, 0, 0, "", false, false
 	}
-	switch {
-	case n2 > 12 && n3 <= 12:
-		return n2, n3, year, "ydm", false, true
-	case n3 > 12 && n2 <= 12:
-		return n3, n2, year, "ymd", false, true
-	case n2 <= 12 && n3 <= 12:
-		return n3, n2, year, "ymd", sep != '-', true
-	}
-	return 0, 0, 0, "", false, false
+	return dateOrderYearFirst(n2, n3, year, sep)
 }
 
 // yearFromGroup normalises a 2- or 4-digit year group.
@@ -1641,6 +1867,52 @@ func dateTailYear(ctx *Context, j, now int, gate *int8) (year, end, last int, wo
 	return y, toks[lastTok].End, lastTok, true, true
 }
 
+// dateWordYearKind classifies a word of a spelled-out year.
+type dateWordYearKind uint8
+
+const (
+	dateWordYearOther dateWordYearKind = iota
+	dateWordYearScale
+	dateWordYearCardinal
+	dateWordYearOrdinal
+)
+
+// dateWordYearClass classifies one word of a spelled-out year and returns its
+// kind together with the numeric value it contributes.
+func dateWordYearClass(w string) (dateWordYearKind, int) {
+	if scale, ok := dateYearScale[w]; ok {
+		return dateWordYearScale, scale
+	}
+	if v, ok := dateYearCardinal[w]; ok {
+		return dateWordYearCardinal, v
+	}
+	if v, ok := dateYearOrdinal(w); ok {
+		return dateWordYearOrdinal, v
+	}
+	return dateWordYearOther, 0
+}
+
+// dateWordYearScaleApply applies a thousands scale word to the accumulator.
+func dateWordYearScaleApply(v, sum, pending int) (newSum, newPending int) {
+	if pending == 0 {
+		pending = 1
+	}
+	return sum + pending*v, 0
+}
+
+// dateWordYearOrdinalClose closes the year with an ordinal component. It
+// returns the final year value, the index of the closing token, and whether
+// the ordinal is a valid closer.
+func dateWordYearOrdinalClose(v, sum, pending int, scaled bool, i int) (year, last int, ok bool) {
+	if v >= 1000 {
+		scaled = true
+	}
+	if !scaled {
+		return 0, 0, false
+	}
+	return sum + pending + v, i, true
+}
+
 // dateWordYear reads a year written out in Russian words starting at token i
 // and returns its value together with the index of its last token.
 //
@@ -1671,32 +1943,19 @@ func dateWordYear(ctx *Context, i int, gate *int8) (year, last int, ok bool) {
 		}
 		w := s[toks[i].Start:toks[i].End]
 		words++
-		if scale, isScale := dateYearScale[w]; isScale {
-			if pending == 0 {
-				pending = 1
-			}
-			sum += pending * scale
-			pending, scaled = 0, true
-		} else if v, isCard := dateYearCardinal[w]; isCard {
+		kind, v := dateWordYearClass(w)
+		switch kind {
+		case dateWordYearScale:
+			sum, pending = dateWordYearScaleApply(v, sum, pending)
+			scaled = true
+		case dateWordYearCardinal:
 			pending += v
-		} else if v, isOrd := dateYearOrdinal(w); isOrd {
-			if v >= 1000 {
-				scaled = true
-			}
-			if !scaled {
-				return 0, 0, false
-			}
-			return sum + pending + v, i, true
-		} else {
+		case dateWordYearOrdinal:
+			return dateWordYearOrdinalClose(v, sum, pending, scaled, i)
+		default:
 			return 0, 0, false
 		}
-		i++
-		if i < len(toks) && toks[i].Kind == text.KindSpace {
-			if !dateInlineSpace(s, toks[i]) {
-				return 0, 0, false
-			}
-			i++
-		}
+		i = dateSkipInline(s, toks, i+1)
 	}
 	return 0, 0, false
 }

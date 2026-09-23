@@ -37,25 +37,30 @@ func checkFinance(t *testing.T, payload string, want []wantFin) {
 		t.Fatalf("payload %q: got %d spans, want %d (%+v)", payload, len(got), len(want), got)
 	}
 	for i, w := range want {
-		g := got[i]
-		if g.Start < 0 || g.End > len(ctx.Text) || g.Start >= g.End {
-			t.Fatalf("payload %q: span %d has bad range %d..%d", payload, i, g.Start, g.End)
-		}
-		if s := ctx.Slice(g.Start, g.End); s != w.text {
-			t.Errorf("payload %q: span %d covers %q, want %q", payload, i, s, w.text)
-		}
-		if g.Type != w.typ {
-			t.Errorf("payload %q: span %d type %s, want %s", payload, i, g.Type, w.typ)
-		}
-		if g.Conf != w.conf {
-			t.Errorf("payload %q: span %d conf %v, want %v", payload, i, g.Conf, w.conf)
-		}
-		if g.Hint != w.hint {
-			t.Errorf("payload %q: span %d hint %q, want %q", payload, i, g.Hint, w.hint)
-		}
-		if g.Src != "finance" {
-			t.Errorf("payload %q: span %d src %q, want %q", payload, i, g.Src, "finance")
-		}
+		checkFinanceSpan(t, ctx, payload, i, got[i], w)
+	}
+}
+
+// checkFinanceSpan validates one detected span against its expectation.
+func checkFinanceSpan(t *testing.T, ctx *Context, payload string, i int, g pd.Span, w wantFin) {
+	t.Helper()
+	if g.Start < 0 || g.End > len(ctx.Text) || g.Start >= g.End {
+		t.Fatalf("payload %q: span %d has bad range %d..%d", payload, i, g.Start, g.End)
+	}
+	if s := ctx.Slice(g.Start, g.End); s != w.text {
+		t.Errorf("payload %q: span %d covers %q, want %q", payload, i, s, w.text)
+	}
+	if g.Type != w.typ {
+		t.Errorf("payload %q: span %d type %s, want %s", payload, i, g.Type, w.typ)
+	}
+	if g.Conf != w.conf {
+		t.Errorf("payload %q: span %d conf %v, want %v", payload, i, g.Conf, w.conf)
+	}
+	if g.Hint != w.hint {
+		t.Errorf("payload %q: span %d hint %q, want %q", payload, i, g.Hint, w.hint)
+	}
+	if g.Src != "finance" {
+		t.Errorf("payload %q: span %d src %q, want %q", payload, i, g.Src, "finance")
 	}
 }
 

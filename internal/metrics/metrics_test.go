@@ -99,26 +99,32 @@ func TestExpositionIsWellFormed(t *testing.T) {
 	Observe("demask", 429, time.Millisecond, 1, 1)
 
 	for _, line := range strings.Split(strings.TrimRight(scrape(t), "\n"), "\n") {
-		if line == "" {
-			t.Fatal("blank line in exposition")
+		checkExpositionLine(t, line)
+	}
+}
+
+// checkExpositionLine validates a single line of the Prometheus exposition.
+func checkExpositionLine(t *testing.T, line string) {
+	t.Helper()
+	if line == "" {
+		t.Fatal("blank line in exposition")
+	}
+	if strings.HasPrefix(line, "#") {
+		if !strings.HasPrefix(line, "# HELP ") && !strings.HasPrefix(line, "# TYPE ") {
+			t.Errorf("unexpected comment line %q", line)
 		}
-		if strings.HasPrefix(line, "#") {
-			if !strings.HasPrefix(line, "# HELP ") && !strings.HasPrefix(line, "# TYPE ") {
-				t.Errorf("unexpected comment line %q", line)
-			}
-			continue
-		}
-		sp := strings.LastIndexByte(line, ' ')
-		if sp < 0 {
-			t.Errorf("sample line without value: %q", line)
-			continue
-		}
-		if _, err := strconv.ParseFloat(line[sp+1:], 64); err != nil {
-			t.Errorf("sample line %q: value not a float: %v", line, err)
-		}
-		if strings.Count(line[:sp], "{") != strings.Count(line[:sp], "}") {
-			t.Errorf("unbalanced braces in %q", line)
-		}
+		return
+	}
+	sp := strings.LastIndexByte(line, ' ')
+	if sp < 0 {
+		t.Errorf("sample line without value: %q", line)
+		return
+	}
+	if _, err := strconv.ParseFloat(line[sp+1:], 64); err != nil {
+		t.Errorf("sample line %q: value not a float: %v", line, err)
+	}
+	if strings.Count(line[:sp], "{") != strings.Count(line[:sp], "}") {
+		t.Errorf("unbalanced braces in %q", line)
 	}
 }
 
@@ -448,46 +454,14 @@ func TestConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(workers)
 	for w := 0; w < workers; w++ {
-		go func(w int) {
-			defer wg.Done()
-			for i := 0; i < iters; i++ {
-				IncInflight()
-				Observe("mask", 200, time.Duration(i)*time.Microsecond, 5, 5)
-				ObservePDType("FIO")
-				ObserveDetect(time.Duration(i) * time.Microsecond)
-				IncRejected("rate_limit")
-				SetStoreStats(int64(i), 1, 2, 3, 4, 5, 6)
-				DecInflight()
-			}
-		}(w)
+		go concurrentWorker(w, iters, &wg)
 	}
 
 	var readers sync.WaitGroup
 	readers.Add(2)
 	done := make(chan struct{})
-	go func() {
-		defer readers.Done()
-		for {
-			select {
-			case <-done:
-				return
-			default:
-				var buf bytes.Buffer
-				WritePrometheus(&buf)
-			}
-		}
-	}()
-	go func() {
-		defer readers.Done()
-		for {
-			select {
-			case <-done:
-				return
-			default:
-				_ = Snapshot()
-			}
-		}
-	}()
+	go concurrentScraper(done, &readers)
+	go concurrentSnapper(done, &readers)
 
 	wg.Wait()
 	close(done)
@@ -502,5 +476,46 @@ func TestConcurrent(t *testing.T) {
 	}
 	if got := seriesValue(t, out, "pdguard_inflight"); got != 0 {
 		t.Errorf("inflight = %v, want 0", got)
+	}
+}
+
+// concurrentWorker hammers every exported recorder from one goroutine.
+func concurrentWorker(w, iters int, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for i := 0; i < iters; i++ {
+		IncInflight()
+		Observe("mask", 200, time.Duration(i)*time.Microsecond, 5, 5)
+		ObservePDType("FIO")
+		ObserveDetect(time.Duration(i) * time.Microsecond)
+		IncRejected("rate_limit")
+		SetStoreStats(int64(i), 1, 2, 3, 4, 5, 6)
+		DecInflight()
+	}
+}
+
+// concurrentScraper renders the registry until done is closed.
+func concurrentScraper(done <-chan struct{}, readers *sync.WaitGroup) {
+	defer readers.Done()
+	for {
+		select {
+		case <-done:
+			return
+		default:
+			var buf bytes.Buffer
+			WritePrometheus(&buf)
+		}
+	}
+}
+
+// concurrentSnapper takes snapshots until done is closed.
+func concurrentSnapper(done <-chan struct{}, readers *sync.WaitGroup) {
+	defer readers.Done()
+	for {
+		select {
+		case <-done:
+			return
+		default:
+			_ = Snapshot()
+		}
 	}
 }

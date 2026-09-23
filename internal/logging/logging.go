@@ -44,6 +44,10 @@ import (
 // string has no debugging value that is worth the risk of leaking a document.
 const FreeTextLimit = 64
 
+// redactedSuffix is the closing marker every scrub replacement shares, so the
+// operator can recognise a redacted value at a glance.
+const redactedSuffix = " redacted]"
+
 var safeKeys = map[string]bool{
 	"payload_id":  true,
 	"system":      true,
@@ -250,15 +254,15 @@ func Scrub(s string) string {
 		out = reEmail.ReplaceAllString(out, "[email redacted]")
 	}
 	out = rePhone.ReplaceAllStringFunc(out, func(m string) string {
-		return "[phone:" + strconv.Itoa(countDigits(m)) + " redacted]"
+		return "[phone:" + strconv.Itoa(countDigits(m)) + redactedSuffix
 	})
 	// Grouped digits go before the plain run: a card is written as four
 	// groups of four, and "4276 3801 2345 6789" contains no run of six.
 	out = reGroups.ReplaceAllStringFunc(out, func(m string) string {
-		return "[digits:" + strconv.Itoa(countDigits(m)) + " redacted]"
+		return "[digits:" + strconv.Itoa(countDigits(m)) + redactedSuffix
 	})
 	out = reDigits.ReplaceAllStringFunc(out, func(m string) string {
-		return "[digits:" + strconv.Itoa(len(m)) + " redacted]"
+		return "[digits:" + strconv.Itoa(len(m)) + redactedSuffix
 	})
 	out = reNameRun.ReplaceAllString(out, "[name redacted]")
 	return out
@@ -306,48 +310,56 @@ func looksSensitive(s string) bool {
 	letters := 0 // letters in the current word
 	upper := false
 	inWord := false
-	flush := func() {
-		if !inWord {
-			return
-		}
-		if upper && letters >= 2 {
-			capRun++
-		} else {
-			capRun = 0
-		}
-		inWord, upper, letters = false, false, 0
-	}
 	for _, r := range s {
-		switch {
-		case unicode.IsDigit(r):
-			flush()
-			digits++
-			if digits >= 4 {
-				return true
-			}
-			capRun = 0
-		case unicode.IsLetter(r):
-			digits = 0
-			if !inWord {
-				inWord = true
-				upper = unicode.IsUpper(r)
-			}
-			letters++
-		default:
-			flush()
-			digits = 0
-			// A separator other than a single space or dot breaks the
-			// name shape: "Иванов, Петров" is a list, not a full name.
-			if r != ' ' && r != '.' && r != '\u00A0' {
-				capRun = 0
-			}
-		}
-		if capRun >= 2 {
+		if sensitiveRune(r, &digits, &capRun, &letters, &upper, &inWord) {
 			return true
 		}
 	}
-	flush()
+	flushWord(&capRun, &inWord, &upper, &letters)
 	return capRun >= 2
+}
+
+// sensitiveRune advances the state machine by one rune and reports whether the
+// string has become sensitive.
+func sensitiveRune(r rune, digits, capRun *int, letters *int, upper, inWord *bool) bool {
+	switch {
+	case unicode.IsDigit(r):
+		flushWord(capRun, inWord, upper, letters)
+		*digits++
+		if *digits >= 4 {
+			return true
+		}
+		*capRun = 0
+	case unicode.IsLetter(r):
+		*digits = 0
+		if !*inWord {
+			*inWord = true
+			*upper = unicode.IsUpper(r)
+		}
+		*letters++
+	default:
+		flushWord(capRun, inWord, upper, letters)
+		*digits = 0
+		// A separator other than a single space or dot breaks the
+		// name shape: "Иванов, Петров" is a list, not a full name.
+		if r != ' ' && r != '.' && r != '\u00A0' {
+			*capRun = 0
+		}
+	}
+	return *capRun >= 2
+}
+
+// flushWord folds the current word into the capitalised-word run counter.
+func flushWord(capRun *int, inWord *bool, upper *bool, letters *int) {
+	if !*inWord {
+		return
+	}
+	if *upper && *letters >= 2 {
+		*capRun++
+	} else {
+		*capRun = 0
+	}
+	*inWord, *upper, *letters = false, false, 0
 }
 
 // scrubHandler wraps any slog.Handler and applies the whitelist policy to

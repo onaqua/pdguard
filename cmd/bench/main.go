@@ -85,6 +85,9 @@ func (o *options) validate() error {
 	return nil
 }
 
+// processPath is the /process endpoint path the tool talks to.
+const processPath = "/process"
+
 // normalizeEndpoint turns a -url argument into the /process endpoint. The case
 // that motivated it is "origin only": a run against http://localhost:8080 used
 // to 404 five times in a row and abort under the streak rule, which looks in
@@ -100,14 +103,11 @@ func normalizeEndpoint(in string) (string, string, error) {
 	}
 	note := ""
 	switch u.Path {
-	case "", "/":
-		u.Path = "/process"
+	case "", "/", processPath + "/":
+		u.Path = processPath
 		note = "endpoint normalised to " + u.String()
-	case "/process":
+	case processPath:
 		// Already the endpoint; nothing to say.
-	case "/process/":
-		u.Path = "/process"
-		note = "endpoint normalised to " + u.String()
 	default:
 		// Some other path is left alone, but the operator should know the
 		// tool is not talking to /process.
@@ -515,39 +515,40 @@ func (b *bench) roundTrip(ctx context.Context, el datasetElement, discard bool) 
 func (b *bench) doRequest(ctx context.Context, payload, id string, discard bool) (int, string, bool, bool) {
 	for attempt := 0; attempt < 3; attempt++ {
 		status, body, retryAfter := b.post(ctx, payload, id, discard)
-		switch {
-		case status == -1:
+		if status == -1 {
 			// The run ended (context done); stop without counting.
 			return 0, "", false, true
-		case status == http.StatusTooManyRequests:
+		}
+		if status == http.StatusTooManyRequests {
 			// A 429 is not an invalid response: it neither advances the
 			// streak nor resets it. Honour Retry-After and try again.
-			if retryAfter > 0 {
-				time.Sleep(retryAfter)
-			} else {
-				time.Sleep(time.Second)
-			}
+			sleepRetryAfter(retryAfter)
 			continue
-		case status == http.StatusOK:
+		}
+		if status == http.StatusOK {
 			if result, ok := parseResult(body); ok {
 				// A successful response resets the invalid streak.
 				b.state.invalidStreak.Store(0)
 				return status, result, true, false
 			}
 			// A 200 with an unparseable body is invalid.
-			if b.state.bumpInvalid() {
-				return status, "", false, false
-			}
-			continue
-		default:
-			// Any other status (or a network error, status 0) is invalid.
-			if b.state.bumpInvalid() {
-				return status, "", false, false
-			}
-			continue
+		}
+		// Any other status (or a network error, status 0) is invalid.
+		if b.state.bumpInvalid() {
+			return status, "", false, false
 		}
 	}
 	return 0, "", false, false
+}
+
+// sleepRetryAfter waits out a 429's Retry-After hint, defaulting to one second
+// when the header is absent or unparseable.
+func sleepRetryAfter(d time.Duration) {
+	if d > 0 {
+		time.Sleep(d)
+	} else {
+		time.Sleep(time.Second)
+	}
 }
 
 // post sends one HTTP request, paced by the limiter. It returns the status, the

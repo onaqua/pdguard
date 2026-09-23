@@ -137,114 +137,26 @@ func TestAccuracyGolden(t *testing.T) {
 	e, _ := newEngine(t)
 	ctx := context.Background()
 
-	var (
-		expectedPairs int // (case, expected type) pairs over the whole corpus
-		foundPairs    int // how many of them the engine reported
-		positives     int
-		negatives     int
-		negativeClean int
-		exactRestore  int
-
-		missedByType = map[string]int{}
-		extraByType  = map[string]int{}
-		missedCases  []string
-	)
-
+	st := &goldenStats{
+		missedByType: map[string]int{},
+		extraByType:  map[string]int{},
+	}
 	for _, c := range cases {
-		// Forward step. The payload_id is the case id, so the reverse step
-		// below exercises exactly the mapping the graded harness would use.
-		fwd, err := e.Process(ctx, "", c.ID, c.Text)
-		if err != nil {
-			t.Errorf("%s: forward step failed: %v", c.ID, err)
-			continue
-		}
-
-		// Reverse step: feed back the mask we just produced.
-		rev, err := e.Process(ctx, "", c.ID, fwd.Output)
-		if err != nil {
-			t.Errorf("%s: reverse step failed: %v", c.ID, err)
-			continue
-		}
-
-		// Property 3 — demasking is byte exact. Fatal: an inexact restore is a
-		// failed element in the graded run, and it means the store round trip
-		// or the direction decision is broken, not that a detector is shy.
-		if rev.Output == c.Text {
-			exactRestore++
-		} else {
-			t.Errorf("%s: demasking is not byte exact\n  want %q\n  got  %q", c.ID, c.Text, rev.Output)
-		}
-
-		got := make(map[string]bool, len(fwd.Types))
-		for _, ty := range fwd.Types {
-			got[ty] = true
-		}
-
-		if len(c.ExpectTypes) == 0 {
-			// Property 2 — a negative case must leave the text alone. Fatal for
-			// the same reason: the metric charges for every byte we change
-			// without cause, and the specification names these exact shapes
-			// (a poet's name, a branch address) as things we must not touch.
-			negatives++
-			if fwd.Output == c.Text && len(fwd.Types) == 0 {
-				negativeClean++
-			} else {
-				t.Errorf("%s (%s): false positive on a negative case\n  text  %q\n  mask  %q\n  types %v",
-					c.ID, c.Note, c.Text, fwd.Output, fwd.Types)
-			}
-			continue
-		}
-
-		// Property 1 — recall. Reported, not enforced per case: detectors are
-		// tuned towards missing a doubtful span rather than masking clean text,
-		// so individual misses are information for whoever tunes them next.
-		positives++
-		missing := make([]string, 0, len(c.ExpectTypes))
-		for _, want := range c.ExpectTypes {
-			expectedPairs++
-			if got[want] {
-				foundPairs++
-				continue
-			}
-			missing = append(missing, want)
-			missedByType[want]++
-		}
-		if len(missing) > 0 {
-			missedCases = append(missedCases,
-				fmt.Sprintf("%s: missing %v (%s)", c.ID, missing, c.Note))
-		}
-
-		// Types found beyond what the case declares are counted but never
-		// failed: the corpus lists the categories a case is *about*, and a
-		// long sentence legitimately carries more. They are still worth
-		// printing — a type that shows up everywhere is usually a detector
-		// that has become too eager.
-		for _, ty := range fwd.Types {
-			want := false
-			for _, exp := range c.ExpectTypes {
-				if exp == ty {
-					want = true
-					break
-				}
-			}
-			if !want {
-				extraByType[ty]++
-			}
-		}
+		scoreGoldenCase(t, e, ctx, c, st)
 	}
 
-	recall := ratio(foundPairs, expectedPairs)
-	negClean := ratio(negativeClean, negatives)
-	restore := ratio(exactRestore, len(cases))
+	recall := ratio(st.foundPairs, st.expectedPairs)
+	negClean := ratio(st.negativeClean, st.negatives)
+	restore := ratio(st.exactRestore, len(cases))
 
 	t.Log("=== golden corpus summary ===")
-	t.Logf("cases            %d (%d positive, %d negative)", len(cases), positives, negatives)
-	t.Logf("recall           %.3f  (%d/%d expected type occurrences)", recall, foundPairs, expectedPairs)
-	t.Logf("negatives clean  %.3f  (%d/%d untouched)", negClean, negativeClean, negatives)
-	t.Logf("exact restore    %.3f  (%d/%d byte identical)", restore, exactRestore, len(cases))
-	logCounts(t, "missed by type", missedByType)
-	logCounts(t, "extra by type ", extraByType)
-	for _, m := range missedCases {
+	t.Logf("cases            %d (%d positive, %d negative)", len(cases), st.positives, st.negatives)
+	t.Logf("recall           %.3f  (%d/%d expected type occurrences)", recall, st.foundPairs, st.expectedPairs)
+	t.Logf("negatives clean  %.3f  (%d/%d untouched)", negClean, st.negativeClean, st.negatives)
+	t.Logf("exact restore    %.3f  (%d/%d byte identical)", restore, st.exactRestore, len(cases))
+	logCounts(t, "missed by type", st.missedByType)
+	logCounts(t, "extra by type ", st.extraByType)
+	for _, m := range st.missedCases {
 		t.Logf("miss  %s", m)
 	}
 
@@ -257,6 +169,113 @@ func TestAccuracyGolden(t *testing.T) {
 	}
 	if restore < minExactRestore {
 		t.Errorf("exact restore %.3f, want %.2f", restore, minExactRestore)
+	}
+}
+
+// goldenStats accumulates the counters TestAccuracyGolden reports.
+type goldenStats struct {
+	expectedPairs int // (case, expected type) pairs over the whole corpus
+	foundPairs    int // how many of them the engine reported
+	positives     int
+	negatives     int
+	negativeClean int
+	exactRestore  int
+
+	missedByType map[string]int
+	extraByType  map[string]int
+	missedCases  []string
+}
+
+// scoreGoldenCase runs one corpus case through the engine and folds its result
+// into the running totals.
+func scoreGoldenCase(t *testing.T, e *Engine, ctx context.Context, c goldenCase, st *goldenStats) {
+	t.Helper()
+	// Forward step. The payload_id is the case id, so the reverse step
+	// below exercises exactly the mapping the graded harness would use.
+	fwd, err := e.Process(ctx, "", c.ID, c.Text)
+	if err != nil {
+		t.Errorf("%s: forward step failed: %v", c.ID, err)
+		return
+	}
+
+	// Reverse step: feed back the mask we just produced.
+	rev, err := e.Process(ctx, "", c.ID, fwd.Output)
+	if err != nil {
+		t.Errorf("%s: reverse step failed: %v", c.ID, err)
+		return
+	}
+
+	// Property 3 — demasking is byte exact. Fatal: an inexact restore is a
+	// failed element in the graded run, and it means the store round trip
+	// or the direction decision is broken, not that a detector is shy.
+	if rev.Output == c.Text {
+		st.exactRestore++
+	} else {
+		t.Errorf("%s: demasking is not byte exact\n  want %q\n  got  %q", c.ID, c.Text, rev.Output)
+	}
+
+	got := make(map[string]bool, len(fwd.Types))
+	for _, ty := range fwd.Types {
+		got[ty] = true
+	}
+
+	if len(c.ExpectTypes) == 0 {
+		// Property 2 — a negative case must leave the text alone. Fatal for
+		// the same reason: the metric charges for every byte we change
+		// without cause, and the specification names these exact shapes
+		// (a poet's name, a branch address) as things we must not touch.
+		st.negatives++
+		if fwd.Output == c.Text && len(fwd.Types) == 0 {
+			st.negativeClean++
+		} else {
+			t.Errorf("%s (%s): false positive on a negative case\n  text  %q\n  mask  %q\n  types %v",
+				c.ID, c.Note, c.Text, fwd.Output, fwd.Types)
+		}
+		return
+	}
+
+	scoreGoldenPositive(t, c, fwd.Types, got, st)
+}
+
+// scoreGoldenPositive folds a positive case's recall and extra-type counts into
+// the running totals.
+func scoreGoldenPositive(t *testing.T, c goldenCase, types []string, got map[string]bool, st *goldenStats) {
+	t.Helper()
+	// Property 1 — recall. Reported, not enforced per case: detectors are
+	// tuned towards missing a doubtful span rather than masking clean text,
+	// so individual misses are information for whoever tunes them next.
+	st.positives++
+	missing := make([]string, 0, len(c.ExpectTypes))
+	for _, want := range c.ExpectTypes {
+		st.expectedPairs++
+		if got[want] {
+			st.foundPairs++
+			continue
+		}
+		missing = append(missing, want)
+		st.missedByType[want]++
+	}
+	if len(missing) > 0 {
+		st.missedCases = append(st.missedCases,
+			fmt.Sprintf("%s: missing %v (%s)", c.ID, missing, c.Note))
+	}
+
+	// Types found beyond what the case declares are counted but never
+	// failed: the corpus lists the categories a case is *about*, and a
+	// long sentence legitimately carries more. They are still worth
+	// printing — a type that shows up everywhere is usually a detector
+	// that has become too eager.
+	for _, ty := range types {
+		want := false
+		for _, exp := range c.ExpectTypes {
+			if exp == ty {
+				want = true
+				break
+			}
+		}
+		if !want {
+			st.extraByType[ty]++
+		}
 	}
 }
 

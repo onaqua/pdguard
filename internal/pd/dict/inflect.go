@@ -9,21 +9,30 @@ func buildCityForms() {
 	for c := range cities {
 		cityForms[c] = struct{}{}
 		for _, f := range toponymForms(c) {
-			if f == "" || f == c {
-				continue
+			if isCityFormCandidate(f, c) {
+				cityForms[f] = struct{}{}
 			}
-			if _, bad := surnames[f]; bad {
-				continue
-			}
-			if _, bad := firstNames[f]; bad {
-				continue
-			}
-			if _, bad := stopWords[f]; bad {
-				continue
-			}
-			cityForms[f] = struct{}{}
 		}
 	}
+}
+
+// isCityFormCandidate reports whether f is a usable oblique form of city c:
+// non-empty, different from the nominative, and not colliding with a surname,
+// given name or stop word.
+func isCityFormCandidate(f, c string) bool {
+	if f == "" || f == c {
+		return false
+	}
+	if _, bad := surnames[f]; bad {
+		return false
+	}
+	if _, bad := firstNames[f]; bad {
+		return false
+	}
+	if _, bad := stopWords[f]; bad {
+		return false
+	}
+	return true
 }
 
 func splitLastComponent(name string) (head, tail string) {

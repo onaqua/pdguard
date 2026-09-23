@@ -247,92 +247,133 @@ func TestSyntheticKeepsShape(t *testing.T) {
 	s := strategy(t, NameSynthetic)
 
 	t.Run("card passes luhn and keeps format", func(t *testing.T) {
-		const in = "4276 3800 1234 5678"
-		got := s.Mask(in, pd.TypeCardNumber)
-		if got == in {
-			t.Fatalf("card was not replaced")
-		}
-		assertSameSkeleton(t, in, got)
-		d := digitsOf(got)
-		if len(d) != 16 {
-			t.Fatalf("got %d digits, want 16", len(d))
-		}
-		if d[0] != 4 {
-			t.Errorf("brand digit changed: got %d, want 4", d[0])
-		}
-		if want := luhnCheckDigit(d[:len(d)-1]); d[len(d)-1] != want {
-			t.Errorf("luhn check digit %d, want %d", d[len(d)-1], want)
-		}
+		assertSyntheticCard(t, s)
 	})
 
 	t.Run("phone keeps separators", func(t *testing.T) {
-		const in = "+7 (912) 345-67-89"
-		got := s.Mask(in, pd.TypePhone)
-		assertSameSkeleton(t, in, got)
-		d := digitsOf(got)
-		if len(d) != 11 || d[0] != 7 || d[1] != 9 {
-			t.Errorf("got %q: want 11 digits starting with 7,9", got)
-		}
+		assertSyntheticPhone(t, s)
 	})
 
 	t.Run("email keeps domain", func(t *testing.T) {
-		got := s.Mask("ivanov@mail.ru", pd.TypeEmail)
-		if !strings.HasSuffix(got, "@mail.ru") {
-			t.Errorf("got %q, want the domain preserved", got)
-		}
-		local := strings.TrimSuffix(got, "@mail.ru")
-		found := false
-		for _, l := range synEmailLocals {
-			if l == local {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("local part %q is not one of the synthetic pool", local)
-		}
+		assertSyntheticEmail(t, s)
 	})
 
 	t.Run("date stays a valid date", func(t *testing.T) {
-		const in = "12.03.1985"
-		got := s.Mask(in, pd.TypeBirthDate)
-		assertSameSkeleton(t, in, got)
-		g := digitGroups(got)
-		if len(g) != 3 {
-			t.Fatalf("got %q: want three digit groups", got)
-		}
-		if g[0].val < 1 || g[0].val > 28 {
-			t.Errorf("day %d out of range in %q", g[0].val, got)
-		}
-		if g[1].val < 1 || g[1].val > 12 {
-			t.Errorf("month %d out of range in %q", g[1].val, got)
-		}
-		if g[2].val < 1900 || g[2].val > 2100 {
-			t.Errorf("year %d out of range in %q", g[2].val, got)
-		}
+		assertSyntheticDate(t, s)
 	})
 
 	t.Run("name keeps word count and case", func(t *testing.T) {
-		got := s.Mask("ИВАНОВ ИВАН ИВАНОВИЧ", pd.TypeFIO)
-		if n := len(strings.Fields(got)); n != 3 {
-			t.Errorf("got %q: want three words", got)
-		}
-		for _, r := range got {
-			if unicode.IsLower(r) {
-				t.Errorf("got %q: upper-case input must stay upper case", got)
-				break
-			}
-		}
+		assertSyntheticName(t, s)
 	})
 
 	t.Run("generic keeps length and digits", func(t *testing.T) {
-		const in = "4509 123456"
-		got := s.Mask(in, pd.TypePassport)
-		assertSameSkeleton(t, in, got)
-		if got == in {
-			t.Errorf("passport was not replaced")
-		}
+		assertSyntheticGeneric(t, s)
 	})
+}
+
+// assertSyntheticCard checks that a synthetic card passes Luhn and keeps its
+// format and brand digit.
+func assertSyntheticCard(t *testing.T, s Strategy) {
+	t.Helper()
+	const in = "4276 3800 1234 5678"
+	got := s.Mask(in, pd.TypeCardNumber)
+	if got == in {
+		t.Fatalf("card was not replaced")
+	}
+	assertSameSkeleton(t, in, got)
+	d := digitsOf(got)
+	if len(d) != 16 {
+		t.Fatalf("got %d digits, want 16", len(d))
+	}
+	if d[0] != 4 {
+		t.Errorf("brand digit changed: got %d, want 4", d[0])
+	}
+	if want := luhnCheckDigit(d[:len(d)-1]); d[len(d)-1] != want {
+		t.Errorf("luhn check digit %d, want %d", d[len(d)-1], want)
+	}
+}
+
+// assertSyntheticPhone checks that a synthetic phone keeps its separators and
+// leading digits.
+func assertSyntheticPhone(t *testing.T, s Strategy) {
+	t.Helper()
+	const in = "+7 (912) 345-67-89"
+	got := s.Mask(in, pd.TypePhone)
+	assertSameSkeleton(t, in, got)
+	d := digitsOf(got)
+	if len(d) != 11 || d[0] != 7 || d[1] != 9 {
+		t.Errorf("got %q: want 11 digits starting with 7,9", got)
+	}
+}
+
+// assertSyntheticEmail checks that a synthetic email keeps its domain and draws
+// its local part from the synthetic pool.
+func assertSyntheticEmail(t *testing.T, s Strategy) {
+	t.Helper()
+	got := s.Mask("ivanov@mail.ru", pd.TypeEmail)
+	if !strings.HasSuffix(got, "@mail.ru") {
+		t.Errorf("got %q, want the domain preserved", got)
+	}
+	local := strings.TrimSuffix(got, "@mail.ru")
+	found := false
+	for _, l := range synEmailLocals {
+		if l == local {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("local part %q is not one of the synthetic pool", local)
+	}
+}
+
+// assertSyntheticDate checks that a synthetic date stays a valid calendar date.
+func assertSyntheticDate(t *testing.T, s Strategy) {
+	t.Helper()
+	const in = "12.03.1985"
+	got := s.Mask(in, pd.TypeBirthDate)
+	assertSameSkeleton(t, in, got)
+	g := digitGroups(got)
+	if len(g) != 3 {
+		t.Fatalf("got %q: want three digit groups", got)
+	}
+	if g[0].val < 1 || g[0].val > 28 {
+		t.Errorf("day %d out of range in %q", g[0].val, got)
+	}
+	if g[1].val < 1 || g[1].val > 12 {
+		t.Errorf("month %d out of range in %q", g[1].val, got)
+	}
+	if g[2].val < 1900 || g[2].val > 2100 {
+		t.Errorf("year %d out of range in %q", g[2].val, got)
+	}
+}
+
+// assertSyntheticName checks that a synthetic name keeps its word count and
+// letter case.
+func assertSyntheticName(t *testing.T, s Strategy) {
+	t.Helper()
+	got := s.Mask("ИВАНОВ ИВАН ИВАНОВИЧ", pd.TypeFIO)
+	if n := len(strings.Fields(got)); n != 3 {
+		t.Errorf("got %q: want three words", got)
+	}
+	for _, r := range got {
+		if unicode.IsLower(r) {
+			t.Errorf("got %q: upper-case input must stay upper case", got)
+			break
+		}
+	}
+}
+
+// assertSyntheticGeneric checks that a generic synthetic value keeps its length
+// and digit skeleton.
+func assertSyntheticGeneric(t *testing.T, s Strategy) {
+	t.Helper()
+	const in = "4509 123456"
+	got := s.Mask(in, pd.TypePassport)
+	assertSameSkeleton(t, in, got)
+	if got == in {
+		t.Errorf("passport was not replaced")
+	}
 }
 
 // assertSameSkeleton verifies that every non-alphanumeric rune kept its exact

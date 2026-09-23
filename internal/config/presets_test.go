@@ -135,24 +135,36 @@ func TestPresetFiles(t *testing.T) {
 		t.Run(p.name, func(t *testing.T) {
 			want := p.build(t)
 			if *updatePresets {
-				if err := os.MkdirAll(presetDir, 0o755); err != nil {
-					t.Fatalf("mkdir %s: %v", presetDir, err)
-				}
-				if err := os.WriteFile(p.path(), want, 0o644); err != nil {
-					t.Fatalf("write %s: %v", p.path(), err)
-				}
-				t.Logf("wrote %s (%d bytes)", p.path(), len(want))
+				writePreset(t, p, want)
 				return
 			}
-			got, err := os.ReadFile(p.path())
-			if err != nil {
-				t.Fatalf("%v — regenerate with: go test ./internal/config/ -run TestPresetFiles -update", err)
-			}
-			if string(got) != string(want) {
-				t.Fatalf("configs/presets/%s.json is stale or hand-edited; regenerate with: "+
-					"go test ./internal/config/ -run TestPresetFiles -update", p.name)
-			}
+			assertPresetFile(t, p, want)
 		})
+	}
+}
+
+// writePreset writes one preset file under -update.
+func writePreset(t *testing.T, p preset, want []byte) {
+	t.Helper()
+	if err := os.MkdirAll(presetDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", presetDir, err)
+	}
+	if err := os.WriteFile(p.path(), want, 0o644); err != nil {
+		t.Fatalf("write %s: %v", p.path(), err)
+	}
+	t.Logf("wrote %s (%d bytes)", p.path(), len(want))
+}
+
+// assertPresetFile checks that one preset file matches its recipe byte for byte.
+func assertPresetFile(t *testing.T, p preset, want []byte) {
+	t.Helper()
+	got, err := os.ReadFile(p.path())
+	if err != nil {
+		t.Fatalf("%v — regenerate with: go test ./internal/config/ -run TestPresetFiles -update", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("configs/presets/%s.json is stale or hand-edited; regenerate with: "+
+			"go test ./internal/config/ -run TestPresetFiles -update", p.name)
 	}
 }
 
@@ -174,18 +186,25 @@ func TestPresetsLoadAndValidate(t *testing.T) {
 				t.Fatalf("preset %s has no default system %q", p.name, c.DefaultSystem)
 			}
 			for _, typ := range pd.AllTypes {
-				r, ok := sys.Rule(typ)
-				if !ok {
-					t.Fatalf("preset %s: type %s is missing; regenerate the presets", p.name, typ)
-				}
-				if !r.Enabled {
-					continue
-				}
-				if mask.Lookup(r.Strategy) == nil {
-					t.Fatalf("preset %s: type %s names unregistered strategy %q", p.name, typ, r.Strategy)
-				}
+				assertPresetRule(t, p.name, sys, typ)
 			}
 		})
+	}
+}
+
+// assertPresetRule checks that one type of a preset's default system is present,
+// enabled and names a registered strategy.
+func assertPresetRule(t *testing.T, name string, sys *System, typ pd.Type) {
+	t.Helper()
+	r, ok := sys.Rule(typ)
+	if !ok {
+		t.Fatalf("preset %s: type %s is missing; regenerate the presets", name, typ)
+	}
+	if !r.Enabled {
+		return
+	}
+	if mask.Lookup(r.Strategy) == nil {
+		t.Fatalf("preset %s: type %s names unregistered strategy %q", name, typ, r.Strategy)
 	}
 }
 
@@ -198,32 +217,45 @@ func TestPresetsDifferOnlyInMaskingFormat(t *testing.T) {
 	for _, p := range presets[1:] {
 		p := p
 		t.Run(p.name, func(t *testing.T) {
-			c := mustLoadPreset(t, p)
-			if c.Server != base.Server || c.Store != base.Store || c.Log != base.Log {
-				t.Fatal("preset changes server/store/log settings; it must change masking only")
-			}
-			if c.DefaultSystem != base.DefaultSystem || c.RequireSystem != base.RequireSystem {
-				t.Fatal("preset changes system resolution; it must change masking only")
-			}
-			if got, want := systemIDs(c), systemIDs(base); !equalStrings(got, want) {
-				t.Fatalf("systems = %v, want %v", got, want)
-			}
-			for id, sys := range c.Systems {
-				bsys := base.Systems[id]
-				if sys.Enabled != bsys.Enabled || sys.Demask != bsys.Demask || sys.APIKey != bsys.APIKey {
-					t.Fatalf("system %q: access settings differ from the default preset", id)
-				}
-				for typeName, r := range sys.Types {
-					b, ok := bsys.Types[typeName]
-					if !ok {
-						t.Fatalf("system %q: type %s is not in the default preset", id, typeName)
-					}
-					if r.Enabled != b.Enabled || r.MinConfidence != b.MinConfidence {
-						t.Fatalf("system %q type %s: detection settings differ from the default preset", id, typeName)
-					}
-				}
-			}
+			assertPresetFormat(t, p, base)
 		})
+	}
+}
+
+// assertPresetFormat checks that one preset differs from the default preset in
+// masking format only.
+func assertPresetFormat(t *testing.T, p preset, base *Config) {
+	t.Helper()
+	c := mustLoadPreset(t, p)
+	if c.Server != base.Server || c.Store != base.Store || c.Log != base.Log {
+		t.Fatal("preset changes server/store/log settings; it must change masking only")
+	}
+	if c.DefaultSystem != base.DefaultSystem || c.RequireSystem != base.RequireSystem {
+		t.Fatal("preset changes system resolution; it must change masking only")
+	}
+	if got, want := systemIDs(c), systemIDs(base); !equalStrings(got, want) {
+		t.Fatalf("systems = %v, want %v", got, want)
+	}
+	for id, sys := range c.Systems {
+		assertPresetSystem(t, id, sys, base.Systems[id])
+	}
+}
+
+// assertPresetSystem checks that one system of a preset matches the default
+// preset in every respect except the mask format.
+func assertPresetSystem(t *testing.T, id string, sys, bsys *System) {
+	t.Helper()
+	if sys.Enabled != bsys.Enabled || sys.Demask != bsys.Demask || sys.APIKey != bsys.APIKey {
+		t.Fatalf("system %q: access settings differ from the default preset", id)
+	}
+	for typeName, r := range sys.Types {
+		b, ok := bsys.Types[typeName]
+		if !ok {
+			t.Fatalf("system %q: type %s is not in the default preset", id, typeName)
+		}
+		if r.Enabled != b.Enabled || r.MinConfidence != b.MinConfidence {
+			t.Fatalf("system %q type %s: detection settings differ from the default preset", id, typeName)
+		}
 	}
 }
 

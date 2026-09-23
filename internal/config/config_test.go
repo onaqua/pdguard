@@ -45,16 +45,7 @@ func TestDefaultCoversEveryType(t *testing.T) {
 		t.Fatal(`System("DEFAULT") not found: lookup is not case-insensitive`)
 	}
 	for _, typ := range pd.AllTypes {
-		r, ok := sys.Rule(typ)
-		if !ok {
-			t.Fatalf("type %s is missing from the default rules", typ)
-		}
-		if !r.Enabled {
-			t.Fatalf("type %s is disabled by default", typ)
-		}
-		if r.MinConfidence != DefaultMinConfidence {
-			t.Fatalf("type %s: MinConfidence = %v, want %v", typ, r.MinConfidence, DefaultMinConfidence)
-		}
+		assertDefaultRule(t, sys, typ)
 	}
 	want := map[pd.Type]string{
 		pd.TypeFIO:        StrategyInitials,
@@ -64,23 +55,51 @@ func TestDefaultCoversEveryType(t *testing.T) {
 		pd.TypePhone:      StrategyStarsKeep2,
 	}
 	for typ, strategy := range want {
-		r, _ := sys.Rule(typ)
-		if r.Strategy != strategy {
-			t.Fatalf("type %s: Strategy = %q, want %q", typ, r.Strategy, strategy)
-		}
+		assertDefaultStrategy(t, sys, typ, strategy)
 	}
 	// The bonus rule: a PIN or CVV alone is not personal data.
 	for _, typ := range []pd.Type{pd.TypePIN, pd.TypeCVV} {
-		r, _ := sys.Rule(typ)
-		if len(r.RequiresCompanion) != 1 || r.RequiresCompanion[0] != string(pd.TypeCardNumber) {
-			t.Fatalf("type %s: RequiresCompanion = %v, want [%s]", typ, r.RequiresCompanion, pd.TypeCardNumber)
-		}
+		assertCompanionRule(t, sys, typ)
 	}
 	if an, ok := c.System("analytics"); !ok || an.Demask {
 		t.Fatal("the analytics system must exist with demasking disabled")
 	}
 	if ch, ok := c.System("chat-assistant"); !ok || !ch.Demask || ch.APIKey == "" {
 		t.Fatal("the chat-assistant system must exist with demasking on and a sample key")
+	}
+}
+
+// assertDefaultRule checks that the default system enables typ with the default
+// confidence floor.
+func assertDefaultRule(t *testing.T, sys *System, typ pd.Type) {
+	t.Helper()
+	r, ok := sys.Rule(typ)
+	if !ok {
+		t.Fatalf("type %s is missing from the default rules", typ)
+	}
+	if !r.Enabled {
+		t.Fatalf("type %s is disabled by default", typ)
+	}
+	if r.MinConfidence != DefaultMinConfidence {
+		t.Fatalf("type %s: MinConfidence = %v, want %v", typ, r.MinConfidence, DefaultMinConfidence)
+	}
+}
+
+// assertDefaultStrategy checks that typ uses the given mask strategy.
+func assertDefaultStrategy(t *testing.T, sys *System, typ pd.Type, strategy string) {
+	t.Helper()
+	r, _ := sys.Rule(typ)
+	if r.Strategy != strategy {
+		t.Fatalf("type %s: Strategy = %q, want %q", typ, r.Strategy, strategy)
+	}
+}
+
+// assertCompanionRule checks the "mask only in company" rule for typ.
+func assertCompanionRule(t *testing.T, sys *System, typ pd.Type) {
+	t.Helper()
+	r, _ := sys.Rule(typ)
+	if len(r.RequiresCompanion) != 1 || r.RequiresCompanion[0] != string(pd.TypeCardNumber) {
+		t.Fatalf("type %s: RequiresCompanion = %v, want [%s]", typ, r.RequiresCompanion, pd.TypeCardNumber)
 	}
 }
 
@@ -114,22 +133,33 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("systems: got %d, want %d", len(got.Systems), len(src.Systems))
 	}
 	for id, want := range src.Systems {
-		have, ok := got.Systems[id]
-		if !ok {
-			t.Fatalf("system %q lost in the round trip", id)
-		}
-		if have.Name != want.Name || have.Enabled != want.Enabled ||
-			have.APIKey != want.APIKey || have.Demask != want.Demask ||
-			len(have.Types) != len(want.Types) {
-			t.Fatalf("system %q mismatch:\n got %+v\nwant %+v", id, have, want)
-		}
-		for name, wr := range want.Types {
-			hr := have.Types[name]
-			if hr.Enabled != wr.Enabled || hr.Strategy != wr.Strategy || hr.MinConfidence != wr.MinConfidence ||
-				len(hr.RequiresCompanion) != len(wr.RequiresCompanion) {
-				t.Fatalf("system %q type %q mismatch:\n got %+v\nwant %+v", id, name, hr, wr)
-			}
-		}
+		assertSystemRoundTrip(t, got, id, want)
+	}
+}
+
+// assertSystemRoundTrip checks that one system survived the round trip intact.
+func assertSystemRoundTrip(t *testing.T, got *Config, id string, want *System) {
+	t.Helper()
+	have, ok := got.Systems[id]
+	if !ok {
+		t.Fatalf("system %q lost in the round trip", id)
+	}
+	if have.Name != want.Name || have.Enabled != want.Enabled ||
+		have.APIKey != want.APIKey || have.Demask != want.Demask ||
+		len(have.Types) != len(want.Types) {
+		t.Fatalf("system %q mismatch:\n got %+v\nwant %+v", id, have, want)
+	}
+	for name, wr := range want.Types {
+		assertTypeRoundTrip(t, id, name, have.Types[name], wr)
+	}
+}
+
+// assertTypeRoundTrip checks that one type rule survived the round trip intact.
+func assertTypeRoundTrip(t *testing.T, id, name string, hr, wr TypeRule) {
+	t.Helper()
+	if hr.Enabled != wr.Enabled || hr.Strategy != wr.Strategy || hr.MinConfidence != wr.MinConfidence ||
+		len(hr.RequiresCompanion) != len(wr.RequiresCompanion) {
+		t.Fatalf("system %q type %q mismatch:\n got %+v\nwant %+v", id, name, hr, wr)
 	}
 }
 
@@ -236,6 +266,20 @@ func TestApplySwapsAndPersists(t *testing.T) {
 		t.Fatal("Apply stored the caller's struct instead of a clone")
 	}
 
+	assertPersistedConfig(t, path)
+
+	m2, err := Load(path)
+	if err != nil {
+		t.Fatalf("reloading the persisted file failed: %v", err)
+	}
+	if m2.Get().Server.Addr != ":9999" {
+		t.Fatalf("reloaded addr = %q", m2.Get().Server.Addr)
+	}
+}
+
+// assertPersistedConfig checks that the file at path holds the applied config.
+func assertPersistedConfig(t *testing.T, path string) {
+	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("the configuration was not persisted: %v", err)
@@ -250,14 +294,6 @@ func TestApplySwapsAndPersists(t *testing.T) {
 	}
 	if s, ok := reloaded.System("analytics"); !ok || s.Enabled {
 		t.Fatal("the disabled system did not survive persistence")
-	}
-
-	m2, err := Load(path)
-	if err != nil {
-		t.Fatalf("reloading the persisted file failed: %v", err)
-	}
-	if m2.Get().Server.Addr != ":9999" {
-		t.Fatalf("reloaded addr = %q", m2.Get().Server.Addr)
 	}
 }
 
@@ -300,22 +336,7 @@ func TestConcurrentGetDuringApply(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for {
-				select {
-				case <-stop:
-					return
-				default:
-				}
-				c := m.Get()
-				if c == nil || c.DefaultSystem == "" {
-					t.Error("Get returned an incomplete snapshot")
-					return
-				}
-				if s, ok := c.System("default"); !ok || len(s.Types) == 0 {
-					t.Error("the default system vanished from a snapshot")
-					return
-				}
-			}
+			assertSnapshotConsistent(t, m, stop)
 		}()
 	}
 	for i := 0; i < 50; i++ {
@@ -328,6 +349,28 @@ func TestConcurrentGetDuringApply(t *testing.T) {
 	}
 	close(stop)
 	wg.Wait()
+}
+
+// assertSnapshotConsistent reads snapshots until stop is closed, failing if any
+// snapshot is incomplete. It runs on a worker goroutine of the concurrency test.
+func assertSnapshotConsistent(t *testing.T, m *Manager, stop chan struct{}) {
+	t.Helper()
+	for {
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		c := m.Get()
+		if c == nil || c.DefaultSystem == "" {
+			t.Error("Get returned an incomplete snapshot")
+			return
+		}
+		if s, ok := c.System("default"); !ok || len(s.Types) == 0 {
+			t.Error("the default system vanished from a snapshot")
+			return
+		}
+	}
 }
 
 // strategiesRegistered reports whether any mask strategy has registered itself

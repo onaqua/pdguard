@@ -139,17 +139,7 @@ func initialsOf(s string, isWordRune func(rune) bool) string {
 			if inWord {
 				continue
 			}
-			if !first {
-				if afterHyphen {
-					sb.WriteByte('-')
-				} else {
-					sb.WriteByte(' ')
-				}
-			}
-			// Uppercase unconditionally: the reference masks spell initials in
-			// capitals even when the source was typed in lower case.
-			sb.WriteRune(unicode.ToUpper(r))
-			sb.WriteByte('.')
+			writeInitial(&sb, first, afterHyphen, r)
 			first, inWord, afterHyphen = false, true, false
 		case r == '-' || r == '–' || r == '‑':
 			inWord, afterHyphen = false, true
@@ -161,6 +151,22 @@ func initialsOf(s string, isWordRune func(rune) bool) string {
 		return ""
 	}
 	return sb.String()
+}
+
+// writeInitial appends one initial: the separator before it, then the
+// upper-cased letter and a dot.
+func writeInitial(sb *strings.Builder, first, afterHyphen bool, r rune) {
+	if !first {
+		if afterHyphen {
+			sb.WriteByte('-')
+		} else {
+			sb.WriteByte(' ')
+		}
+	}
+	// Uppercase unconditionally: the reference masks spell initials in
+	// capitals even when the source was typed in lower case.
+	sb.WriteRune(unicode.ToUpper(r))
+	sb.WriteByte('.')
 }
 
 func isAnyLetter(r rune) bool { return unicode.IsLetter(r) }

@@ -678,26 +678,24 @@ func (e *Engine) observe(op string, status int, start time.Time, in, out string)
 // Cost: one pass, no allocation, no regexp, early exit on the first signal.
 func looksMasked(s string) bool {
 	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if !maskHintByte[c] {
-			continue
-		}
-		switch c {
-		case '*':
-			if i+1 < len(s) && s[i+1] == '*' {
-				return true
-			}
-		case 'P':
-			if strings.HasPrefix(s[i:], pseudonymPrefix) {
-				return true
-			}
-		default: // '.'
-			if initialsAt(s, i) {
-				return true
-			}
+		if maskHintByte[s[i]] && maskSignalAt(s, i) {
+			return true
 		}
 	}
 	return false
+}
+
+// maskSignalAt reports whether a mask fingerprint starts at byte i. The caller
+// has already confirmed that s[i] is a hint byte, so only the shape matters.
+func maskSignalAt(s string, i int) bool {
+	switch s[i] {
+	case '*':
+		return i+1 < len(s) && s[i+1] == '*'
+	case 'P':
+		return strings.HasPrefix(s[i:], pseudonymPrefix)
+	default: // '.'
+		return initialsAt(s, i)
+	}
 }
 
 // initialsAt reports whether a run of minInitials initials starts at the
@@ -809,28 +807,31 @@ func usesLabelStrategy(sys *config.System) bool {
 // s is expected to start at a '[' found by the caller.
 func hasBracketLabel(s string) bool {
 	for i := 0; i < len(s); i++ {
-		if s[i] != '[' {
-			continue
-		}
-		j := i + 1
-		letters := 0
-		for j < len(s) && j-i <= maxLabelLen {
-			if w := upperLetterWidthAt(s, j); w > 0 {
-				j += w
-				letters++
-				continue
-			}
-			if s[j] == ' ' || s[j] == '_' {
-				j++
-				continue
-			}
-			break
-		}
-		if letters > 0 && j < len(s) && s[j] == ']' {
+		if s[i] == '[' && bracketLabelEnds(s, i) {
 			return true
 		}
 	}
 	return false
+}
+
+// bracketLabelEnds reports whether a label-shaped bracket run starts at i:
+// "[" + upper-case letters (spaces and underscores allowed inside) + "]".
+func bracketLabelEnds(s string, i int) bool {
+	j := i + 1
+	letters := 0
+	for j < len(s) && j-i <= maxLabelLen {
+		if w := upperLetterWidthAt(s, j); w > 0 {
+			j += w
+			letters++
+			continue
+		}
+		if s[j] == ' ' || s[j] == '_' {
+			j++
+			continue
+		}
+		break
+	}
+	return letters > 0 && j < len(s) && s[j] == ']'
 }
 
 // splitPoints returns the cut offsets for chunked detection, starting at 0 and
