@@ -1762,7 +1762,11 @@ func ppIssuerWalkToken(ctx *Context, t text.Token, st *ppIssuerWalkState) bool {
 	switch t.Kind {
 	case text.KindSpace:
 		if strings.ContainsAny(t.In(ctx.Text), "\n\r") {
-			return false
+			// A line break may stand inside an issuer name only when it is
+			// followed by a territory phrase ("УФМС,\nг. Москва").
+			if !ppIssuerTerritoryAhead(ctx, ppTokenFrom(ctx, t.End)) {
+				return false
+			}
 		}
 	case text.KindWord, text.KindAlnum:
 		ok = ppIssuerWalkWord(ctx, t, st)
@@ -1785,6 +1789,43 @@ func ppIssuerWalkToken(ctx *Context, t text.Token, st *ppIssuerWalkState) bool {
 	return true
 }
 
+// ppIssuerTerritoryAhead reports whether the next non-space token at or after
+// token index i begins a territory phrase ("г. Москва", "города Казани"). A
+// comma or line break may stand inside an issuer name only when it is followed
+// by such a phrase, so this is the gate that lets "УФМС,\nг. Москва" stay one
+// span without letting "УФМС города Казани, повторный" swallow the next clause.
+func ppIssuerTerritoryAhead(ctx *Context, i int) bool {
+	escaped := false
+	for ; i < len(ctx.Tokens); i++ {
+		t := ctx.Tokens[i]
+		if t.Kind == text.KindSpace {
+			continue
+		}
+		// Литеральная последовательность "\\n" (обратные косые черты с буквой n)
+		// внутри названия органа — это перенос строки, который пришёл от
+		// проверяющей системы. Пропускаем её и ищем территорию за ней, как за
+		// настоящим переводом строки.
+		if t.Kind == text.KindPunct && t.In(ctx.Text) == "\\" {
+			escaped = true
+			continue
+		}
+		if t.Kind != text.KindWord {
+			return false
+		}
+		w := t.In(ctx.Lower)
+		// Буква n из "\\n" может слиться со следующим словом ("nг. Москва");
+		// срезаем её перед проверкой территории.
+		if escaped && strings.HasPrefix(w, "n") {
+			w = w[1:]
+		}
+		if _, loc := ppLocalityTypes[w]; loc {
+			return true
+		}
+		return dict.IsCityForm(w)
+	}
+	return false
+}
+
 // ppIssuerWalkWord advances the walk over a word or alphanumeric token.
 func ppIssuerWalkWord(ctx *Context, t text.Token, st *ppIssuerWalkState) bool {
 	w := t.In(ctx.Lower)
@@ -1800,7 +1841,54 @@ func ppIssuerWalkWord(ctx *Context, t text.Token, st *ppIssuerWalkState) bool {
 	st.lastWord = w
 	st.words++
 	st.end = t.End
+	// A city name usually closes the territory: the authority name ends there,
+	// and whatever follows ("в установленном порядке", "в прошлом году") is a
+	// separate clause, not part of the issuer. It keeps going only when the
+	// next word continues the authority ("УФМС России по гор. Москве по району
+	// Арбат", "ТП в г. Щёкино УФМС России").
+	if dict.IsCityForm(w) {
+		return ppIssuerCityContinue(ctx, t)
+	}
 	return true
+}
+
+// ppIssuerCityContinue reports whether the issuer walk should keep going after
+// a city name. The walk continues when the next word is another authority word
+// ("УФМС", "России") or a "по"/"в" phrase introducing a further territory
+// ("по району Арбат", "в г. Щёкино"). Otherwise the authority ends at the city.
+func ppIssuerCityContinue(ctx *Context, t text.Token) bool {
+	i := ppNextWordToken(ctx, ppTokenFrom(ctx, t.End))
+	if i < 0 {
+		return false
+	}
+	w := ctx.Tokens[i].In(ctx.Lower)
+	if ppIsAuthorityWord(w) {
+		return true
+	}
+	if w != "по" && w != "в" {
+		return false
+	}
+	j := ppNextWordToken(ctx, i)
+	if j < 0 {
+		return false
+	}
+	nw := ctx.Tokens[j].In(ctx.Lower)
+	if ppIssuerTerritoryWord(nw) {
+		return true
+	}
+	return dict.IsCityForm(nw)
+}
+
+// ppIssuerTerritoryWord reports whether w names a territorial unit that may
+// follow "по"/"в" inside an authority name ("по району Арбат", "по области").
+func ppIssuerTerritoryWord(w string) bool {
+	if _, loc := ppLocalityTypes[w]; loc {
+		return true
+	}
+	if _, reg := ppRegionWords[w]; reg {
+		return true
+	}
+	return w == "району"
 }
 
 // ppIssuerWalkPunct advances the walk over a punctuation token.
@@ -1811,7 +1899,14 @@ func ppIssuerWalkPunct(ctx *Context, t text.Token, st *ppIssuerWalkState) bool {
 			return false
 		}
 		st.end = t.End
-	case "-", "–", "—", "/", "№", "\"", "«", "»":
+	case "-", "–", "—", "/", "№", "\"", "«", "»", "\\":
+		st.end = t.End
+	case ",":
+		// A comma may stand inside an issuer name only when a territory phrase
+		// follows ("УФМС,\nг. Москва"); otherwise it ends the name.
+		if !ppIssuerTerritoryAhead(ctx, ppTokenFrom(ctx, t.End)) {
+			return false
+		}
 		st.end = t.End
 	default:
 		return false
@@ -1942,6 +2037,7 @@ var ppIssuerPredicateWords = map[string]struct{}{
 	"предупредил": {}, "предупредило": {}, "разыскивает": {}, "рекомендует": {},
 	"требует": {}, "утвердил": {}, "утвердило": {}, "принял": {}, "приняло": {},
 	"отказал": {}, "отказало": {}, "начал": {}, "начало": {},
+	"совпадает": {}, "совпадают": {}, "совпадал": {}, "совпадало": {},
 }
 
 var ppBirthStems = []ppStem{
@@ -2219,7 +2315,8 @@ func (d passportDetector) citizenship(ctx *Context, out []pd.Span) []pd.Span {
 }
 
 // ppCitizenshipEmit appends a citizenship span starting at from, returning
-// whether a span was emitted.
+// whether a span was emitted. A slash may separate a second country
+// ("Российская Федерация/Армения"), which is emitted as its own span.
 func ppCitizenshipEmit(ctx *Context, out *[]pd.Span, from int, hint string) bool {
 	s, e, ok := ppCitizenshipSpan(ctx, from)
 	if !ok {
@@ -2229,7 +2326,24 @@ func ppCitizenshipEmit(ctx *Context, out *[]pd.Span, from int, hint string) bool
 		Start: s, End: e, Type: pd.TypeCitizenship,
 		Conf: ppConfCitizenship, Src: detectorPassport, Hint: hint,
 	})
+	if s2, e2, ok := ppCitizenshipAfterSlash(ctx, e); ok {
+		*out = append(*out, pd.Span{
+			Start: s2, End: e2, Type: pd.TypeCitizenship,
+			Conf: ppConfCitizenship, Src: detectorPassport, Hint: hint,
+		})
+	}
 	return true
+}
+
+// ppCitizenshipAfterSlash returns the span of a second country that follows a
+// slash right after the first citizenship span, or ok=false when there is none.
+func ppCitizenshipAfterSlash(ctx *Context, from int) (int, int, bool) {
+	i := ppTokenFrom(ctx, from)
+	if i >= len(ctx.Tokens) || ctx.Tokens[i].Kind != text.KindPunct ||
+		ctx.Text[ctx.Tokens[i].Start] != '/' {
+		return 0, 0, false
+	}
+	return ppCitizenshipSpan(ctx, ctx.Tokens[i].End)
 }
 
 func ppCitizenshipAdjLeft(ctx *Context, off int) (int, int, bool) {
@@ -2253,7 +2367,12 @@ func ppCitizenshipSpan(ctx *Context, from int) (int, int, bool) {
 	limit := from + ppCitizenMaxBytes
 	end := from
 	words := 0
-	for i := ppTokenFrom(ctx, from); i < len(ctx.Tokens); i++ {
+	i := ppTokenFrom(ctx, from)
+	// A multi-word country name ("Соединенные Штаты Америки") is one span.
+	if e := ppCitizenshipMultiCountry(ctx, i); e > 0 {
+		return text.TrimSpanEdges(ctx.Text, from, e)
+	}
+	for ; i < len(ctx.Tokens); i++ {
 		t := ctx.Tokens[i]
 		if t.End > limit || words >= ppCitizenMaxWords {
 			break
@@ -2266,6 +2385,35 @@ func ppCitizenshipSpan(ctx *Context, from int) (int, int, bool) {
 		return 0, 0, false
 	}
 	return text.TrimSpanEdges(ctx.Text, from, end)
+}
+
+// ppCitizenshipMultiCountry returns the end offset of a multi-word country name
+// from the dictionary that starts at token i, or -1 when none does.
+func ppCitizenshipMultiCountry(ctx *Context, i int) int {
+	toks := ctx.Tokens
+	for i < len(toks) && toks[i].Kind == text.KindSpace {
+		i++
+	}
+	if i >= len(toks) || toks[i].Kind != text.KindWord {
+		return -1
+	}
+	parts := []string{ctx.Lower[toks[i].Start:toks[i].End]}
+	end := toks[i].End
+	for j := i + 1; j < len(toks) && len(parts) < ppCitizenMaxWords; j++ {
+		t := toks[j]
+		if t.Kind == text.KindSpace {
+			continue
+		}
+		if t.Kind != text.KindWord {
+			break
+		}
+		parts = append(parts, ctx.Lower[t.Start:t.End])
+		end = t.End
+		if dict.IsCountryPhrase(strings.Join(parts, " ")) {
+			return end
+		}
+	}
+	return -1
 }
 
 // ppCitizenshipWalkToken advances the citizenship span walk over one token,

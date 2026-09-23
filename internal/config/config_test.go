@@ -63,9 +63,10 @@ func TestDefaultCoversEveryType(t *testing.T) {
 	for typ, strategy := range want {
 		assertDefaultStrategy(t, sys, typ, strategy)
 	}
-	// The bonus rule: a PIN or CVV alone is not personal data.
+	// A lone CVV or PIN is personal data by default; the "mask only in
+	// company" rule is an opt-in via requires_companion.
 	for _, typ := range []pd.Type{pd.TypePIN, pd.TypeCVV} {
-		assertCompanionRule(t, sys, typ)
+		assertNoCompanionRule(t, sys, typ)
 	}
 	if an, ok := c.System("analytics"); !ok || an.Demask {
 		t.Fatal("the analytics system must exist with demasking disabled")
@@ -100,12 +101,13 @@ func assertDefaultStrategy(t *testing.T, sys *System, typ pd.Type, strategy stri
 	}
 }
 
-// assertCompanionRule checks the "mask only in company" rule for typ.
-func assertCompanionRule(t *testing.T, sys *System, typ pd.Type) {
+// assertNoCompanionRule checks that typ has no "mask only in company" rule by
+// default.
+func assertNoCompanionRule(t *testing.T, sys *System, typ pd.Type) {
 	t.Helper()
 	r, _ := sys.Rule(typ)
-	if len(r.RequiresCompanion) != 1 || r.RequiresCompanion[0] != string(pd.TypeCardNumber) {
-		t.Fatalf("type %s: RequiresCompanion = %v, want [%s]", typ, r.RequiresCompanion, pd.TypeCardNumber)
+	if len(r.RequiresCompanion) != 0 {
+		t.Fatalf("type %s: RequiresCompanion = %v, want empty by default", typ, r.RequiresCompanion)
 	}
 }
 

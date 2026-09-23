@@ -143,6 +143,13 @@ const (
 	// представителя клиента: 10.03.15" — 61 байт уточнений. Дальнобойность
 	// покупается не шириной, а чистотой промежутка: см. dateCleanRun.
 	dateLabelWindow = 96
+	// dateLabelVerbWindow — дальнобойность глаголов выдачи ("выдан" и т.п.) в
+	// dateLabelAnchor. Шире dateLabelWindow, потому что между глаголом и датой
+	// стоит длинное название органа выдачи: "выдан Отделом УФМС России по
+	// Московской области по г. Балашиха 25.06.2015" — около 60 байт названия.
+	// Безопасность широкого окна держит dateCleanRunIssue: глагол не имеет
+	// права перепрыгнуть через цифру, запятую или конец предложения.
+	dateLabelVerbWindow = 160
 	// dateConfNoYear — дата, у которой года нет вовсе ("15 января", "15 03").
 	// Явный якорь для неё обязателен, поэтому она уверенно выше порога 0.7; но
 	// она ниже dateConfAnchored, чтобы полная дата всегда выигрывала у частичной
@@ -265,6 +272,16 @@ var (
 	}
 	dateIssueLabels = []string{
 		"дата выдачи", "дату выдачи", "даты выдачи", "дате выдачи",
+	}
+	// dateIssueVerbLabels — глаголы выдачи, которые в дальнобойном режиме
+	// dateLabelAnchor признаются меткой даты выдачи ТОЛЬКО при чистом
+	// промежутке (dateCleanRun): между глаголом и датой стоит название органа
+	// выдачи, а не новая клауза. "выдан" в "Паспорт выдан 20.06.2010 в
+	// отделении полиции, прежний 01.02.2005" не дотягивается до второй даты,
+	// потому что запятая разрывает run.
+	dateIssueVerbLabels = []string{
+		"выдан", "выдана", "выдано", "выданы",
+		"выданный", "выданного", "выданной", "выданном", "выданным",
 	}
 	// dateIdentifierLeft / dateIdentifierRight — слова, которые превращают
 	// пару из двух чисел <= 12 в половину чужого идентификатора: серию
@@ -1178,6 +1195,41 @@ func dateCleanRun(lower string, from, to int) bool {
 	return true
 }
 
+// dateCleanRunIssue — dateCleanRun для глаголов выдачи, которые дотягиваются
+// через название органа выдачи. Такое название законно содержит точку
+// сокращения ("по г. Москве"), поэтому точка здесь НЕ разрыв, в отличие от
+// dateCleanRunByte. Запятая, тире, цифры и конец предложения остаются
+// разрывами: "Паспорт выдан 20.06.2010 в отделении полиции, прежний
+// 01.02.2005" не даёт второй дате стать датой выдачи.
+func dateCleanRunIssue(lower string, from, to int) bool {
+	if from < 0 || to > len(lower) || from >= to {
+		return false
+	}
+	for i := from; i < to; i++ {
+		if dateCleanRunIssueByte(lower, from, to, i) {
+			return false
+		}
+	}
+	return true
+}
+
+// dateCleanRunIssueByte — dateCleanRunByte без точки как разрыва.
+func dateCleanRunIssueByte(lower string, from, to, i int) bool {
+	switch c := lower[i]; {
+	case c >= '0' && c <= '9':
+		return true
+	case c == ';' || c == '!' || c == '?' || c == '\n' || c == '\r':
+		return true
+	case c == ',' || c == '(' || c == ')':
+		return true
+	case c == 0xE2:
+		return dateCleanRunEmDash(lower, to, i)
+	case c == '-':
+		return dateCleanRunDash(lower, from, to, i)
+	}
+	return false
+}
+
 // dateLabelAnchor — дальнобойный напарник leftAnchor, ограниченный явными
 // метками поля и чистым промежутком. Побеждает ближайшая метка, как и в
 // leftAnchor.
@@ -1186,21 +1238,51 @@ func dateLabelAnchor(lower string, start int) dateAnchor {
 	if from < 0 {
 		from = 0
 	}
-	best, bestEnd, kind := -1, -1, anchorNone
-	for _, a := range dateBirthLabels {
-		if i := lastAnchor(lower, from, start, a); i > best {
-			best, bestEnd, kind = i, i+len(a), anchorBirth
-		}
+	// Глаголы выдачи дотягиваются через длинное название органа, поэтому для
+	// них окно шире (dateLabelVerbWindow); прочие метки сохраняют dateLabelWindow.
+	verbFrom := start - dateLabelVerbWindow
+	if verbFrom < 0 {
+		verbFrom = 0
 	}
-	for _, a := range dateIssueLabels {
-		if i := lastAnchor(lower, from, start, a); i > best {
-			best, bestEnd, kind = i, i+len(a), anchorIssue
-		}
+	best, bestEnd := -1, -1
+	kind, verb := anchorNone, false
+	anchor := &dateBestAnchor{best: &best, bestEnd: &bestEnd, kind: &kind, verb: &verb}
+	dateLabelScan(lower, from, start, dateBirthLabels, anchorBirth, false, anchor)
+	dateLabelScan(lower, from, start, dateIssueLabels, anchorIssue, false, anchor)
+	dateLabelScan(lower, verbFrom, start, dateIssueVerbLabels, anchorIssue, true, anchor)
+	if best < 0 {
+		return anchorNone
 	}
-	if best < 0 || !dateCleanRun(lower, bestEnd, start) {
+	// The issue verbs reach across an issuer name, which legitimately contains
+	// an abbreviation dot ("по г. Москве"), so they use the dot-tolerant run
+	// check; the field labels keep the strict one.
+	if verb {
+		if !dateCleanRunIssue(lower, bestEnd, start) {
+			return anchorNone
+		}
+	} else if !dateCleanRun(lower, bestEnd, start) {
 		return anchorNone
 	}
 	return kind
+}
+
+// dateBestAnchor groups the running best anchor found by dateLabelScan so the
+// scan can update all four fields through a single pointer.
+type dateBestAnchor struct {
+	best, bestEnd *int
+	kind          *dateAnchor
+	verb          *bool
+}
+
+// dateLabelScan scans the labels in list for the nearest occurrence before
+// start within [from,start) and, when it beats the current best, records it.
+func dateLabelScan(lower string, from, start int, list []string, kind dateAnchor, verb bool, anchor *dateBestAnchor) {
+	for _, a := range list {
+		if i := lastAnchor(lower, from, start, a); i > *anchor.best {
+			*anchor.best, *anchor.bestEnd = i, i+len(a)
+			*anchor.kind, *anchor.verb = kind, verb
+		}
+	}
 }
 
 // dateAnchorAt — то, что теперь спрашивают classify и новые правила:

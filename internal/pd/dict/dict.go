@@ -183,9 +183,14 @@ func IsCity(w string) bool        { load(); _, ok := cities[w]; return ok }
 func IsStreetType(w string) bool  { load(); _, ok := streetTypes[w]; return ok }
 func IsCountry(w string) bool     { load(); _, ok := countries[w]; return ok }
 func IsCitizenship(w string) bool { load(); _, ok := citizenships[w]; return ok }
-func IsIssuerWord(w string) bool  { load(); _, ok := issuerWords[w]; return ok }
-func IsStopWord(w string) bool    { load(); _, ok := stopWords[w]; return ok }
-func IsOrgWord(w string) bool     { load(); _, ok := orgWords[w]; return ok }
+
+// IsCountryPhrase reports whether the whole space-joined phrase is a country
+// name from the dictionary, covering the multi-word long forms ("соединенные
+// штаты америки").
+func IsCountryPhrase(phrase string) bool { load(); _, ok := countries[phrase]; return ok }
+func IsIssuerWord(w string) bool         { load(); _, ok := issuerWords[w]; return ok }
+func IsStopWord(w string) bool           { load(); _, ok := stopWords[w]; return ok }
+func IsOrgWord(w string) bool            { load(); _, ok := orgWords[w]; return ok }
 
 // IsBankPlace reports whether a toponym belongs to the bank's own premises,
 // which must not be masked as a client address.

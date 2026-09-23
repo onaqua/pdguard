@@ -237,6 +237,8 @@ var (
 		{s: "трехзначного кода"}, {s: "трёхзначного кода"},
 		{s: "код на обороте"}, {s: "кода на обороте"},
 		{s: "security code"}, {s: "card verification"},
+		// Transliterations of "CVV" as spoken over the phone.
+		{s: "сививи"}, {s: "цвв"},
 	}
 
 	finPINAnchors = []finAnchor{
@@ -244,6 +246,8 @@ var (
 		{s: "пинкод"}, {s: "pincode"}, {s: "pin code"}, {s: "pin-code"},
 		{s: "код карты"}, {s: "кода карты"},
 		{s: "секретный код"}, {s: "секретного кода"},
+		// "п.и.н.к.о.д." — the label spelled out letter by letter.
+		{s: "п.и.н.к.о.д."},
 	}
 )
 
@@ -264,9 +268,36 @@ var (
 	finCVVProbes     = []string{
 		"cvv", "cvc", "cid", "провер", "защитн", "безопасн",
 		"цифр", "оборот", "значн", "security", "verification",
+		"сививи", "цвв",
 	}
-	finPINProbes = []string{"пин", "pin", "код карт", "кода карт", "секретн"}
+	finPINProbes = []string{"пин", "pin", "код карт", "кода карт", "секретн", "п.и.н"}
 )
+
+// finMarkerSet is a set of cue words matched at word boundaries: whole words,
+// word prefixes and bare fragments.
+type finMarkerSet struct {
+	words     []string
+	prefixes  []string
+	fragments []string
+}
+
+// finNonCardPINMarkers are cues that a PIN belongs to something other than a
+// bank card — a SIM card, a personal account or an intercom — in which case it
+// is not personal data and must not be masked. They are matched at word
+// boundaries within the same sentence as the PIN.
+var finNonCardPINMarkers = finMarkerSet{
+	words:    []string{"sim"},
+	prefixes: []string{"сим-карт", "сим карт", "sim-карт", "sim карт", "домофон"},
+}
+
+// finOrgINNMarkers are cues that a ten-digit INN belongs to an organisation
+// rather than an individual, in which case it is not personal data. "инн/кпп"
+// is the requisites pair that only an organisation carries.
+var finOrgINNMarkers = finMarkerSet{
+	words:     []string{"ооо", "ао", "пао", "зао"},
+	prefixes:  []string{"организаци", "компани", "поставщик", "контрагент", "юридическ"},
+	fragments: []string{"инн/кпп"},
+}
 
 // finChainEnd returns the end of the digit chain starting at i.
 func finChainEnd(s string, i int) int {
@@ -561,29 +592,39 @@ func (s *finScan) accountHit(i int) (int, bool) {
 // scanINN finds single-group INNs, then delegates to scanINNGrouped.
 func (s *finScan) scanINN() {
 	for k := 0; k < len(s.groups); k++ {
-		g := s.groups[k]
-		n := g.end - g.start
-		if n != 10 && n != 12 {
-			continue
-		}
-		if s.usedOverlap(g.start, g.end) {
-			continue
-		}
-		d := s.lower[g.start:g.end]
-		if finAllSame(d) {
-			continue
-		}
-		conf, ok := s.innConf(d, n, s.innCued(g.start), finINNChecksum(d))
-		if !ok {
-			continue
-		}
-		hint := "organization"
-		if n == 12 {
-			hint = "personal"
-		}
-		s.emit(g.start, g.end, pd.TypeINN, conf, hint)
+		s.scanINNGroup(k)
 	}
 	s.scanINNGrouped()
+}
+
+// scanINNGroup examines one group as a candidate INN.
+func (s *finScan) scanINNGroup(k int) {
+	g := s.groups[k]
+	n := g.end - g.start
+	if n != 10 && n != 12 {
+		return
+	}
+	if s.usedOverlap(g.start, g.end) {
+		return
+	}
+	d := s.lower[g.start:g.end]
+	if finAllSame(d) {
+		return
+	}
+	// A ten-digit INN is an organisation's requisites, not personal data,
+	// when the sentence around it names an organisation.
+	if n == 10 && s.orgINN(g.start) {
+		return
+	}
+	conf, ok := s.innConf(d, n, s.innCued(g.start), finINNChecksum(d))
+	if !ok {
+		return
+	}
+	hint := "organization"
+	if n == 12 {
+		hint = "personal"
+	}
+	s.emit(g.start, g.end, pd.TypeINN, conf, hint)
 }
 
 // innConf picks the confidence for a single-group INN, or reports no match.
@@ -670,6 +711,14 @@ func (s *finScan) innCued(off int) bool {
 		finCueLeft(s.lower, off, finINNAnchors, finAnchorWindow)
 }
 
+// orgINN reports whether a ten-digit INN at offset off belongs to an
+// organisation, which is not personal data. The sentence around the INN
+// carries an organisation cue.
+func (s *finScan) orgINN(off int) bool {
+	start, end := finSentenceBounds(s.lower, off)
+	return finHasMarker(s.lower[start:end], finOrgINNMarkers)
+}
+
 // scanSecrets finds CVV and PIN codes next to their cue words.
 func (s *finScan) scanSecrets() {
 	for k := 0; k < len(s.groups); k++ {
@@ -681,16 +730,67 @@ func (s *finScan) scanSecrets() {
 		if s.usedOverlap(g.start, g.end) {
 			continue
 		}
-		if s.cvv && n <= 4 && s.cue(&s.cvvCue, finCVVProbes) &&
-			finCueLeft(s.lower, g.start, finCVVAnchors, finShortAnchorWindow) {
+		if s.cvv && n <= 4 && s.cvvHit(g, k) {
 			s.emit(g.start, g.end, pd.TypeCVV, finConfSecret, "cvv")
 			continue
 		}
-		if s.pin && n >= 4 && s.cue(&s.pinCue, finPINProbes) &&
-			finCueLeft(s.lower, g.start, finPINAnchors, finShortAnchorWindow) {
+		if s.pin && n >= 4 && s.pinHit(g, k) {
 			s.emit(g.start, g.end, pd.TypePIN, finConfSecret, "pin")
 		}
 	}
+}
+
+// cvvHit reports whether group k is a CVV: a cue word to the left, a cue word
+// to the right (the "код 258 … CVV" pattern), or a three-digit run straight
+// after a card number.
+func (s *finScan) cvvHit(g finGroup, k int) bool {
+	if s.cue(&s.cvvCue, finCVVProbes) &&
+		finCueLeft(s.lower, g.start, finCVVAnchors, finShortAnchorWindow) {
+		return true
+	}
+	if g.end-g.start == 3 && s.cue(&s.cvvCue, finCVVProbes) &&
+		finCueRight(s.lower, g.end, finCVVAnchors, finShortAnchorWindow) {
+		return true
+	}
+	return s.afterCard(g, k, 3)
+}
+
+// pinHit reports whether group k is a PIN: a cue word to the left (unless the
+// PIN belongs to a SIM card, a personal account or an intercom) or a four-digit
+// run straight after a card number.
+func (s *finScan) pinHit(g finGroup, k int) bool {
+	if s.afterCard(g, k, 4) {
+		return true
+	}
+	if !s.cue(&s.pinCue, finPINProbes) ||
+		!finCueLeft(s.lower, g.start, finPINAnchors, finShortAnchorWindow) {
+		return false
+	}
+	start, end := finSentenceBounds(s.lower, g.start)
+	sent := s.lower[start:end]
+	return !finHasMarker(sent, finNonCardPINMarkers) && !finHasPersonalAccount(sent)
+}
+
+// afterCard reports whether group k is a run of exactly want digits that
+// follows a card number directly and is followed by the end of the line or
+// punctuation.
+func (s *finScan) afterCard(g finGroup, k, want int) bool {
+	if k == 0 || g.end-g.start != want {
+		return false
+	}
+	prev := s.groups[k-1]
+	if prev.end-prev.start != 16 {
+		return false
+	}
+	if !text.IsBoundary(s.lower, g.end) {
+		return false
+	}
+	for _, u := range s.used {
+		if u[0] == prev.start && u[1] == prev.end {
+			return true
+		}
+	}
+	return false
 }
 
 // scanIBAN finds IBAN candidates by direct four-character comparison.
@@ -1060,6 +1160,133 @@ func finHasDigit(s string) bool {
 		}
 	}
 	return false
+}
+
+// finCueRight searches for a cue word to the right of offset after, within a
+// window. It backs the "label after the value" pattern, e.g. "код 258 … CVV".
+func finCueRight(s string, after int, anchors []finAnchor, window int) bool {
+	to := after + window
+	if to > len(s) {
+		to = len(s)
+	}
+	win := s[after:to]
+	for _, a := range anchors {
+		for off := 0; off < len(win); {
+			i := strings.Index(win[off:], a.s)
+			if i < 0 {
+				break
+			}
+			abs := after + off + i
+			end := abs + len(a.s)
+			if text.IsBoundary(s, abs) && (!a.exact || text.IsBoundary(s, end)) &&
+				!finHasDigit(s[after:abs]) {
+				return true
+			}
+			off += i + 1
+		}
+	}
+	return false
+}
+
+// finSentenceBounds returns the byte range of the sentence containing offset.
+// A sentence ends at a period, exclamation mark, question mark or newline.
+func finSentenceBounds(s string, offset int) (int, int) {
+	start := offset
+	for start > 0 && !finIsSentenceEnd(s[start-1]) {
+		start--
+	}
+	end := offset
+	for end < len(s) && !finIsSentenceEnd(s[end]) {
+		end++
+	}
+	return start, end
+}
+
+// finIsSentenceEnd reports whether c terminates a sentence.
+func finIsSentenceEnd(c byte) bool {
+	return c == '.' || c == '!' || c == '?' || c == '\n' || c == '\r'
+}
+
+// finHasMarker reports whether s contains any marker of the set: a whole word,
+// a word prefix or a bare fragment.
+func finHasMarker(s string, set finMarkerSet) bool {
+	for _, w := range set.words {
+		if finHasWord(s, w) {
+			return true
+		}
+	}
+	for _, p := range set.prefixes {
+		if finHasPrefix(s, p) {
+			return true
+		}
+	}
+	for _, f := range set.fragments {
+		if strings.Contains(s, f) {
+			return true
+		}
+	}
+	return false
+}
+
+// finHasWord reports whether s contains word as a whole word.
+func finHasWord(s, word string) bool {
+	for off := 0; off < len(s); {
+		i := strings.Index(s[off:], word)
+		if i < 0 {
+			return false
+		}
+		abs := off + i
+		end := abs + len(word)
+		if text.IsBoundary(s, abs) && text.IsBoundary(s, end) {
+			return true
+		}
+		off = abs + 1
+	}
+	return false
+}
+
+// finHasPrefix reports whether s contains a word starting with prefix.
+func finHasPrefix(s, prefix string) bool {
+	for off := 0; off < len(s); {
+		i := strings.Index(s[off:], prefix)
+		if i < 0 {
+			return false
+		}
+		abs := off + i
+		if text.IsBoundary(s, abs) {
+			return true
+		}
+		off = abs + 1
+	}
+	return false
+}
+
+// finHasPersonalAccount reports whether s contains a word starting with "личн"
+// immediately followed by a word starting with "кабинет", i.e. "личный
+// кабинет" in any case form.
+func finHasPersonalAccount(s string) bool {
+	for off := 0; off < len(s); {
+		i := strings.Index(s[off:], "личн")
+		if i < 0 {
+			return false
+		}
+		abs := off + i
+		if text.IsBoundary(s, abs) && finNextWordIs(s, abs, "кабинет") {
+			return true
+		}
+		off = abs + 1
+	}
+	return false
+}
+
+// finNextWordIs reports whether the word starting at i is immediately followed
+// by a word starting with next.
+func finNextWordIs(s string, i int, next string) bool {
+	_, end := text.ExpandWord(s, i, i)
+	for end < len(s) && (s[end] == ' ' || s[end] == '\t') {
+		end++
+	}
+	return strings.HasPrefix(s[end:], next) && text.IsBoundary(s, end)
 }
 
 // finIssuerDigit reports whether c is a payment-card major industry digit.

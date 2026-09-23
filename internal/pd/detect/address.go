@@ -270,6 +270,7 @@ const (
 var addrResidenceAnchors = []string{
 	addrPhraseProzhivaet, "проживаю", addrPhraseProzhivayush, addrPhrasePropisan,
 	addrPhraseMesto, addrPhraseMesta, addrPhraseMestu,
+	"проживания", "живу", "живёт", "живет",
 }
 
 var addrNameConnectors = map[string]struct{}{

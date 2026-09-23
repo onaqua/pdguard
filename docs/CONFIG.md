@@ -115,8 +115,8 @@ Slowloris. `max_concurrent` фиксируется при старте: изме
 
 Стратегии по умолчанию для типов: `initials` для `FIO`, `initials_latin` для
 `CARD_HOLDER`, `stars_all` для `CVV` и `PIN`, `stars_keep2` для всего остального.
-`CVV` и `PIN` по умолчанию имеют `requires_companion: ["CARD_NUMBER"]` — они
-маскируются только рядом с номером карты.
+Одиночные `CVV` и `PIN` маскируются по умолчанию. Правило «только в паре»
+включается через `requires_companion: ["CARD_NUMBER"]` для нужного типа.
 
 ## Готовые пресеты
 

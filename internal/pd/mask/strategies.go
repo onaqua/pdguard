@@ -132,19 +132,22 @@ func (starsAllStrategy) Mask(original string, _ pd.Type) string {
 func initialsOf(s string, isWordRune func(rune) bool) string {
 	var sb strings.Builder
 	sb.Grow(len(s) + 8)
-	inWord, afterHyphen, first := false, false, true
+	inWord, first := false, true
+	sep := byte(' ')
 	for _, r := range s {
 		switch {
 		case isWordRune(r):
 			if inWord {
 				continue
 			}
-			writeInitial(&sb, first, afterHyphen, r)
-			first, inWord, afterHyphen = false, true, false
+			writeInitial(&sb, first, sep, r)
+			first, inWord = false, true
 		case r == '-' || r == '–' || r == '‑':
-			inWord, afterHyphen = false, true
+			inWord, sep = false, '-'
+		case r == '/':
+			inWord, sep = false, '/'
 		default:
-			inWord, afterHyphen = false, false
+			inWord, sep = false, ' '
 		}
 	}
 	if first {
@@ -154,14 +157,11 @@ func initialsOf(s string, isWordRune func(rune) bool) string {
 }
 
 // writeInitial appends one initial: the separator before it, then the
-// upper-cased letter and a dot.
-func writeInitial(sb *strings.Builder, first, afterHyphen bool, r rune) {
+// upper-cased letter and a dot. sep is the byte written between initials: a
+// space, a hyphen (double surname) or a slash (alternative surname).
+func writeInitial(sb *strings.Builder, first bool, sep byte, r rune) {
 	if !first {
-		if afterHyphen {
-			sb.WriteByte('-')
-		} else {
-			sb.WriteByte(' ')
-		}
+		sb.WriteByte(sep)
 	}
 	// Uppercase unconditionally: the reference masks spell initials in
 	// capitals even when the source was typed in lower case.

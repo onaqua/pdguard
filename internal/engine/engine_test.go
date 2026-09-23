@@ -32,7 +32,8 @@ const (
 	cleanPayload = "Отделение банка на улице Ленина работает с 9 до 18."
 	// CARD_NUMBER alone, detected at conf 0.85 (anchored, not Luhn-valid).
 	cardPayload = "Оплата картой 4276 1600 1234 5678 прошла успешно."
-	// PIN alone, detected at conf 0.93 but worthless without a card next to it.
+	// PIN alone, detected at conf 0.93; masked by default, dropped only when
+	// the requires_companion rule is enabled.
 	pinOnlyPayload = "ПИН-код 1234 менять раз в год."
 	pinCardPayload = "Карта 4276 1600 1234 5678, ПИН-код 1234."
 )
@@ -223,9 +224,14 @@ func TestDirectionDemaskMissEchoesPayload(t *testing.T) {
 // Configuration
 // ---------------------------------------------------------------------------
 
-// A PIN on its own is not personal data; a PIN next to a card number is.
+// The "mask only in company" rule is an opt-in: when requires_companion is set
+// for a type, a lone value is not masked, but a value next to its companion is.
 func TestRequiresCompanion(t *testing.T) {
-	e, _ := newEngine(t)
+	e, _ := newEngineWith(t, func(c *config.Config) {
+		setRule(c, pd.TypePIN, func(r *config.TypeRule) {
+			r.RequiresCompanion = []string{string(pd.TypeCardNumber)}
+		})
+	})
 
 	alone := mustProcess(t, e, "c1", pinOnlyPayload)
 	if alone.Output != pinOnlyPayload {
@@ -250,6 +256,10 @@ func TestCompanionMustSurviveConfidenceFirst(t *testing.T) {
 	e, _ := newEngineWith(t, func(c *config.Config) {
 		// The card in pinCardPayload is detected at 0.85; this floor drops it.
 		setRule(c, pd.TypeCardNumber, func(r *config.TypeRule) { r.MinConfidence = 0.95 })
+		// The companion rule is opt-in; enable it to exercise the ordering.
+		setRule(c, pd.TypePIN, func(r *config.TypeRule) {
+			r.RequiresCompanion = []string{string(pd.TypeCardNumber)}
+		})
 	})
 
 	res := mustProcess(t, e, "c3", pinCardPayload)

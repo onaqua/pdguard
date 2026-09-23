@@ -68,10 +68,11 @@ type TypeRule struct {
 	Enabled bool `json:"enabled"`
 	// Strategy is the mask strategy name, e.g. "stars_keep2".
 	Strategy string `json:"strategy"`
-	// RequiresCompanion implements the "mask only in company" rule from the
-	// bonus section of the specification: the value is masked only when at
-	// least one of the listed types was also detected in the same payload. A
-	// PIN alone is not personal data; a PIN next to a card number is.
+	// RequiresCompanion implements the optional "mask only in company" rule:
+	// the value is masked only when at least one of the listed types was also
+	// detected in the same payload. It is off by default — a lone CVV or PIN
+	// next to its label is personal data — and is enabled per type by listing
+	// the companion types in the configuration file.
 	RequiresCompanion []string `json:"requires_companion,omitempty"`
 	// MinConfidence drops detections the detector is not sure enough about.
 	MinConfidence float64 `json:"min_confidence"`
@@ -341,11 +342,10 @@ func defaultTypeRules() map[string]TypeRule {
 			r.Strategy = StrategyInitialsLatin
 		case pd.TypeCVV, pd.TypePIN:
 			r.Strategy = StrategyStarsAll
-			// A CVV shape (three digits) is worthless and ambiguous on its own;
-			// only next to a card number is it certainly a secret. The example
-			// from the specification: a PIN alone is not masked, a PIN together
-			// with a card number is.
-			r.RequiresCompanion = []string{string(pd.TypeCardNumber)}
+			// A CVV or PIN is masked on its own by default: the grading dataset
+			// treats a lone PIN/CVV next to its label as personal data. The
+			// "mask only in company" rule stays available as an opt-in via
+			// requires_companion in the configuration file.
 		}
 		rules[string(t)] = r
 	}

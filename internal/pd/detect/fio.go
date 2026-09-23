@@ -374,6 +374,14 @@ func fioTryThreeComponents(cls []fioClass, c1, c2, c3 fioComp) (fioMatch, bool) 
 		return fioMatch{start: c1.start, end: c3.end, lastTok: c3.lastTok,
 			conf: fioConfFull, hint: "full", surname: c3.lower}, true
 	}
+	// «Имя Фамилия Отчество»: имя открывает тройку, фамилия стоит в середине,
+	// отчество замыкает. Два существующих правила покрывают «Фамилия Имя
+	// Отчество» и «Имя Отчество Фамилия», но не этот порядок, из-за чего
+	// отчество оставалось открытым.
+	if c1.cls&fioClsFirst != 0 && c2.cls&fioClsSurname != 0 && c3.cls&fioClsPatr != 0 {
+		return fioMatch{start: c1.start, end: c3.end, lastTok: c3.lastTok,
+			conf: fioConfFull, hint: "full", surname: c2.lower}, true
+	}
 	return fioMatch{}, false
 }
 
@@ -1092,6 +1100,15 @@ func fioFamous(ctx *Context, tokIdx int, m fioMatch) bool {
 	if !fioAnyPart(m.surname, dict.IsFamousSurnameForm) {
 		return false
 	}
+	// Фамилия, известная СЛОВАРЮ фамилий, — это скорее реальный клиент, чем
+	// знаменитость: «Гарсия» (с «ия») морфологически выводится из «Гарсиа»
+	// (с «иа»), но является обычной испанской фамилией. Полное имя
+	// знаменитости всё равно ловится первыми двумя проверками, а фамилии
+	// знаменитостей, совпадающие с обычными («Крылов»), в famousSurnameForms
+	// не попадают вовсе.
+	if fioValueSurnameKnown(m) {
+		return false
+	}
 	return !fioHasAnchor(ctx, tokIdx, m.start)
 }
 
@@ -1466,6 +1483,7 @@ var fioNegContext = fioSet([]string{
 	"стихи", "стихов", "стихотворение", "стихотворения", "сказка", "сказки",
 	"произведение", "произведения", "произведений", "творчество", "творчества",
 	"цитата", "цитаты", "цитирует", "сочинение", "сочинения",
+	"является", "являются", "являлся", "являлась",
 	"улица", "улицы", "улице", "улицу", "ул",
 	"площадь", "площади", "проспект", "проспекта", "переулок", "переулка",
 	"набережная", "набережной", "бульвар", "бульвара", "шоссе",
@@ -1519,6 +1537,7 @@ var fioGeoLeft = fioSet([]string{
 // letters[0] + "." + letters[1], поэтому записи без завершающей точки.
 var fioAbbrevPair = fioSet([]string{
 	"т.е", "т.к", "т.д", "т.п", "т.н", "и.о", "н.э", "г.р", "с.г", "д.р",
+	"г.о", "м.о",
 })
 
 // fioHolderAnchorWords: строчные подстроки, помещающие латинское имя в контекст
@@ -1736,10 +1755,14 @@ func fioReadValueInitial(ctx *Context, run *fioValueRun, first bool, prevInitial
 	if dot.Kind != text.KindPunct || dot.Start != t.End || ctx.Text[dot.Start:dot.End] != "." {
 		return false, true, ""
 	}
-	if first && !text.IsUpperFirst(s) {
+	// Строчный инициал в начале значения («и. иван петрович») принимается,
+	// если буква не неоднозначна («г.», «д.» — это сокращения, а не инициалы).
+	// Одиночное «и.» само по себе всё равно не пройдёт fioValueRunAccepted,
+	// потому что требует минимум двух атомов или словарного подтверждения.
+	letter = ctx.Lower[t.Start:t.End]
+	if fioAmbiguousInitialAtStart(first, s, letter) {
 		return true, false, ""
 	}
-	letter = ctx.Lower[t.Start:t.End]
 	if prevInitial != "" {
 		if _, bad := fioAbbrevPair[prevInitial+"."+letter]; bad {
 			return true, false, ""
@@ -1756,6 +1779,18 @@ func fioReadValueInitial(ctx *Context, run *fioValueRun, first bool, prevInitial
 		return true, true, letter
 	}
 	return true, false, ""
+}
+
+// fioAmbiguousInitialAtStart reports whether a lowercase initial at the very
+// start of a value run is an ambiguous abbreviation («г.», «д.») rather than a
+// real initial. Uppercase initials and non-ambiguous lowercase letters («и.»)
+// are accepted.
+func fioAmbiguousInitialAtStart(first bool, s, letter string) bool {
+	if !first || text.IsUpperFirst(s) {
+		return false
+	}
+	_, amb := fioAmbiguousInitial[letter]
+	return amb
 }
 
 // fioReadValueCompAtom reads one full component atom into run. It returns
@@ -1951,10 +1986,15 @@ func fioIsCapitalInitial(ctx *Context, i int) bool {
 
 // fioValueOverlaps: спан нового конверта не должен пересекаться с уже
 // выданными спанами; Resolve всё равно снимет пересечения, но ранний отказ
-// дешевле и не даёт слабому правилу укоротить сильное.
-func fioValueOverlaps(out []pd.Span, start, end int) bool {
+// дешевле и не даёт слабому правилу укоротить сильное. Когда allowExtend
+// истинно, разрешён спан, который СТРОГО длиннее существующего и полностью
+// его покрывает: это более полное чтение того же имени (например,
+// «иван петрович и.» поверх «иван петрович»), и Resolve оставит более длинный
+// спан. Равный спан — это чистое дублирование, его отвергаем всегда.
+func fioValueOverlaps(out []pd.Span, start, end int, allowExtend bool) bool {
 	for _, s := range out {
-		if start < s.End && s.Start < end {
+		if start < s.End && s.Start < end &&
+			!(allowExtend && s.Start >= start && s.End <= end && (s.Start > start || s.End < end)) {
 			return true
 		}
 	}
@@ -2021,6 +2061,10 @@ func fioScanValues(ctx *Context, out []pd.Span) []pd.Span {
 	// (fioStrongAnchor) или за фразой из fioStrongPhraseAnchor, без двоеточия.
 	out = fioValueAnchored(ctx, cls, noCase, out)
 
+	// R4 — fioScanLatinValues. Латинское имя держателя внутри предложения,
+	// без карточного якоря: «Sidorova Anna подтвердила операцию по карте».
+	out = fioScanLatinValues(ctx, cls, noCase, out)
+
 	return out
 }
 
@@ -2046,7 +2090,7 @@ func fioValueStandalone(ctx *Context, cls []fioClass, noCase bool, out []pd.Span
 		surname:    run.surname,
 		standalone: true,
 	}
-	if fioVetoed(ctx, tokIdx, m) || fioValueOverlaps(out, run.start, run.end) {
+	if fioVetoed(ctx, tokIdx, m) || fioValueOverlaps(out, run.start, run.end, noCase) {
 		return out
 	}
 	return fioEmitValue(out, run, fioConfStandalone)
@@ -2105,7 +2149,7 @@ func fioEmitValueChecked(ctx *Context, out []pd.Span, run fioValueRun, startTok 
 		lastTok: fioValueLastTok(ctx, run),
 		surname: run.surname,
 	}
-	if fioVetoed(ctx, startTok, m) || fioValueOverlaps(out, run.start, run.end) {
+	if fioVetoed(ctx, startTok, m) || fioValueOverlaps(out, run.start, run.end, true) {
 		return out, false
 	}
 	return fioEmitValue(out, run, conf), true
@@ -2182,4 +2226,36 @@ func fioValueSkipStopWord(ctx *Context, startTok int) int {
 		return next
 	}
 	return startTok
+}
+
+// fioScanLatinValues — конверт R4: латинское имя держателя карты внутри
+// предложения, без карточного якоря. «Sidorova Anna подтвердила операцию по
+// карте» и «имя «SMIRNOVA ANNA»» — это имя держателя, а не транслитерация
+// русского имени: первый атом обязан читаться как латинская фамилия
+// (окончание -ov/-ova/...), иначе это «Ivan Petrov», который без карточного
+// контекста маскировать нельзя. Прогон читается тем же fioReadValueRun, что и
+// конверты R1–R3, поэтому латинская фамилия + имя собираются в один спан.
+func fioScanLatinValues(ctx *Context, cls []fioClass, noCase bool, out []pd.Span) []pd.Span {
+	for i := 0; i < len(ctx.Tokens); i++ {
+		t := ctx.Tokens[i]
+		if t.Kind != text.KindWord || !text.IsLatinWord(ctx.Lower[t.Start:t.End]) {
+			continue
+		}
+		run, ok := fioReadValueRun(ctx, cls, i, noCase)
+		if !ok || !run.latinOnly || run.atoms < 2 || !fioValueLatinSurname(run) {
+			continue
+		}
+		m := fioMatch{
+			start:   run.start,
+			end:     run.end,
+			lastTok: fioValueLastTok(ctx, run),
+			surname: run.surname,
+		}
+		if fioVetoed(ctx, i, m) || fioValueOverlaps(out, run.start, run.end, true) {
+			continue
+		}
+		out = fioEmitValue(out, run, fioConfHolder)
+		i = run.lastTok
+	}
+	return out
 }

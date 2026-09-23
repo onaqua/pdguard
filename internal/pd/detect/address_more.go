@@ -13,18 +13,21 @@ import (
 // addrIsBankPlace reports whether a candidate is the bank's own premises and
 // must not be masked as a client address.
 func addrIsBankPlace(ctx *Context, c addrCandidate, k *addrSentCache) bool {
-	if c.name != "" {
-		if dict.IsBankPlace(c.name) {
-			return true
-		}
-		for _, part := range strings.Fields(c.name) {
-			if dict.IsBankPlace(part) {
-				return true
-			}
-		}
-	}
 	bank := addrLastPhrase(ctx.Lower, c.span.Start-addrBankWindow, c.span.Start, addrBankWords)
 	if bank >= 0 {
+		// A toponym that names the bank's own premises is only suppressed when a
+		// bank word stands nearby: "улица Арбат" in a client address is personal
+		// data, while "отделение банка ... улица Арбат" is the branch itself.
+		if c.name != "" {
+			if dict.IsBankPlace(c.name) {
+				return true
+			}
+			for _, part := range strings.Fields(c.name) {
+				if dict.IsBankPlace(part) {
+					return true
+				}
+			}
+		}
 		personal := addrLastPhrase(ctx.Lower, c.span.Start-addrBankWindow, c.span.Start, addrPersonalAnchors)
 		return personal <= bank
 	}
@@ -583,11 +586,11 @@ func addrMarkerAt(ctx *Context, i int) (addrMarker, int, bool) {
 	}
 	w := ctx.Lower[t.Start:t.End]
 
-	if i+2 < len(toks) && addrPunctByte(ctx, toks[i+1], '-') && toks[i+2].Kind == text.KindWord {
-		joined := w + "-" + ctx.Lower[toks[i+2].Start:toks[i+2].End]
-		if m, ok := addrMarkers[joined]; ok {
-			return m, addrSkipDot(ctx, i+3), true
-		}
+	if m, next, ok := addrMarkerGO(ctx, i, w); ok {
+		return m, next, true
+	}
+	if m, next, ok := addrMarkerHyphen(ctx, i, w); ok {
+		return m, next, true
 	}
 
 	m, ok := addrMarkers[w]
@@ -607,6 +610,38 @@ func addrMarkerAt(ctx *Context, i int) (addrMarker, int, bool) {
 		next++
 	}
 	return m, next, true
+}
+
+// addrMarkerGO recognises the "г.о." / "г. о." (городской округ) marker before
+// "г" is taken for a plain city marker.
+func addrMarkerGO(ctx *Context, i int, w string) (addrMarker, int, bool) {
+	toks := ctx.Tokens
+	if w != "г" || i+3 >= len(toks) || !addrPunctByte(ctx, toks[i+1], '.') {
+		return addrMarker{}, i, false
+	}
+	j := i + 2
+	if toks[j].Kind == text.KindSpace {
+		j++
+	}
+	if j+1 < len(toks) && toks[j].Kind == text.KindWord &&
+		ctx.Lower[toks[j].Start:toks[j].End] == "о" &&
+		addrPunctByte(ctx, toks[j+1], '.') {
+		return addrMarker{addrMkRegion, false}, j + 2, true
+	}
+	return addrMarker{}, i, false
+}
+
+// addrMarkerHyphen recognises hyphenated markers such as "р-н" or "пр-кт".
+func addrMarkerHyphen(ctx *Context, i int, w string) (addrMarker, int, bool) {
+	toks := ctx.Tokens
+	if i+2 >= len(toks) || !addrPunctByte(ctx, toks[i+1], '-') || toks[i+2].Kind != text.KindWord {
+		return addrMarker{}, i, false
+	}
+	joined := w + "-" + ctx.Lower[toks[i+2].Start:toks[i+2].End]
+	if m, ok := addrMarkers[joined]; ok {
+		return m, addrSkipDot(ctx, i+3), true
+	}
+	return addrMarker{}, i, false
 }
 
 func addrSkipDot(ctx *Context, i int) int {
@@ -672,6 +707,13 @@ func addrScanNameWords(ctx *Context, k, start, end int, caseBlind bool) (int, in
 		t := toks[k]
 		if t.Kind != text.KindWord || !addrIsNameWord(ctx, t, caseBlind) {
 			break
+		}
+		// A connector abbreviation like "им." is glue, not part of the name:
+		// skip it and read the name that follows ("пгт им. Воровского").
+		if _, conn := addrNameConnectors[ctx.Lower[t.Start:t.End]]; conn &&
+			k+1 < len(toks) && addrPunctByte(ctx, toks[k+1], '.') {
+			k = addrSkipSpace(toks, k+2)
+			continue
 		}
 		if start < 0 {
 			start = t.Start

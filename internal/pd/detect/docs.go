@@ -37,6 +37,10 @@ import (
 	"pdguard/internal/pd/text"
 )
 
+// docSentenceEndChars are the characters that terminate a sentence for the
+// purpose of keeping a cue word and its number in the same sentence.
+const docSentenceEndChars = ".\n\r;!?"
+
 // Confidence levels used by this detector. They are coarse on purpose: the
 // resolver only needs a stable ordering, not a calibrated probability.
 const (
@@ -153,9 +157,26 @@ var (
 	// ("N", "No"). Without it the shape stopped at "77 12" and the licence went
 	// to the passport detector, whose pattern is the same four-plus-six digits.
 	// The alternatives are ordered longest first: Go's regexp is leftmost-FIRST,
-	// so "номера" has to be offered before "номер" to be seen at all.
+	// so "номера" has to be offered before "номер" to be seen at all. A comma may
+	// stand right after the series ("серия 45 67, номер 891234"); it is not part
+	// of the value, so docInnerLabel keeps it out of the emitted spans.
 	reDocDriverLicense = regexp.MustCompile(
-		`[0-9]{2}[ \t]{0,32}[0-9]{2}[ \t]{0,32}(?:(?:номера|номером|номер|№|#|no|n)\.?[ \t]{0,32})?[0-9]{6}`)
+		`[0-9]{2}[ \t]{0,32}[0-9]{2},?[ \t]{0,32}(?:(?:номера|номером|номер|№|#|no|n)\.?[ \t]{0,32})?[0-9]{6}`)
+	// The bare 2+2+6 value with the cue word AFTER it: "65 43 210987 —
+	// водительское удостоверение". The licence shape is meaningless without the
+	// cue, so the cue is part of the match; only the leading digits are emitted.
+	reDocDriverLicenseRight = regexp.MustCompile(
+		`[0-9]{2}[ \t]{0,32}[0-9]{2}[ \t]{0,32}[0-9]{6}[ \t]{0,32}(?:—|–|-)?[ \t]{0,32}(?:водительск|в/у)`)
+	// The digit halves of the two shapes above, used to cut the value out of a
+	// match that also carries a label or a trailing cue.
+	reDocDriverLicenseDigits = regexp.MustCompile(`[0-9]{2}[ \t]{0,32}[0-9]{2}[ \t]{0,32}[0-9]{6}`)
+	// A series and a number written with their own labels, possibly separated by
+	// an insertion: "серия 55 66, выданное ГИБДД, номер 778899". Each label is
+	// matched with its digits so the digits can be cut out and emitted alone.
+	reDocSeriesLabel  = regexp.MustCompile(`серия[ \t]{0,32}[0-9]{2}[ \t]{0,32}[0-9]{2}`)
+	reDocNumberLabel  = regexp.MustCompile(`номер[ \t]{0,32}[0-9]{6}`)
+	reDocSeriesDigits = regexp.MustCompile(`[0-9]{2}[ \t]{0,32}[0-9]{2}`)
+	reDocNumberDigits = regexp.MustCompile(`[0-9]{6}`)
 	// Pre-2011 licences carry a two-letter Cyrillic series.
 	reDocDriverLicenseOld = regexp.MustCompile(`[а-яё]{2} ?(?:№ ?)?[0-9]{6}`)
 	// The other pre-2011 layout puts the region code first: "77 АА 123456".
@@ -365,6 +386,11 @@ func (docsDetector) Detect(ctx *Context) []pd.Span {
 			continue
 		}
 		docScanRange(lower, r.re, 0, len(lower), accept)
+	}
+
+	if ctx.Enabled(pd.TypeDriverLicense) {
+		docScanDriverLicenseRight(ctx, &out)
+		docScanDriverLicenseSplit(ctx, &out)
 	}
 	return out
 }
@@ -577,6 +603,79 @@ func docScanRange(s string, re *regexp.Regexp, from, to int, accept func(start, 
 			pos = start + 1
 		}
 	}
+}
+
+// docScanDriverLicenseRight covers the licence written with its cue word AFTER
+// the value: "65 43 210987 — водительское удостоверение". The main rule only
+// looks for a cue to the LEFT, so this shape would otherwise be missed. The cue
+// is part of the match only to prove the digits are a licence; the emitted span
+// is the leading digit run alone.
+func docScanDriverLicenseRight(ctx *Context, out *[]pd.Span) {
+	lower := ctx.Lower
+	for pos := 0; pos < len(lower); {
+		loc := reDocDriverLicenseRight.FindStringIndex(lower[pos:])
+		if loc == nil {
+			return
+		}
+		start, end := pos+loc[0], pos+loc[1]
+		docEmitDriverLicenseDigits(lower, out, start, end, reDocDriverLicenseDigits)
+		pos = end
+	}
+}
+
+// docScanDriverLicenseSplit covers a series and a number written with their own
+// labels and separated by an insertion: "серия 55 66, выданное ГИБДД, номер
+// 778899". Each half is emitted as its own span, but only when a driver-licence
+// cue stands earlier in the same sentence — otherwise the labels belong to some
+// other document and the passport detector owns the digits.
+func docScanDriverLicenseSplit(ctx *Context, out *[]pd.Span) {
+	lower := ctx.Lower
+	for _, m := range reDocSeriesLabel.FindAllStringIndex(lower, -1) {
+		if docDriverLicenseAnchorBefore(ctx, m[0]) {
+			docEmitDriverLicenseDigits(lower, out, m[0], m[1], reDocSeriesDigits)
+		}
+	}
+	for _, m := range reDocNumberLabel.FindAllStringIndex(lower, -1) {
+		if docDriverLicenseAnchorBefore(ctx, m[0]) {
+			docEmitDriverLicenseDigits(lower, out, m[0], m[1], reDocNumberDigits)
+		}
+	}
+}
+
+// docEmitDriverLicenseDigits cuts the digit run out of a match that also carries
+// a label or a cue and appends it as a driver-licence span. The digits are the
+// only personal data; the surrounding words survive byte for byte. A span that
+// overlaps one the main rules already emitted is dropped: the split rule exists
+// only for the layouts the main rule cannot join, so it must not double-claim
+// the digits of a value the main rule already owns.
+func docEmitDriverLicenseDigits(lower string, out *[]pd.Span, start, end int, re *regexp.Regexp) {
+	dl := re.FindStringIndex(lower[start:end])
+	if dl == nil {
+		return
+	}
+	digStart, digEnd := start+dl[0], start+dl[1]
+	if !text.IsBoundary(lower, digStart) || !text.IsBoundary(lower, digEnd) {
+		return
+	}
+	for _, sp := range *out {
+		if digStart < sp.End && sp.Start < digEnd {
+			return
+		}
+	}
+	*out = append(*out, pd.Span{
+		Start: digStart, End: digEnd, Type: pd.TypeDriverLicense,
+		Conf: docConfAnchored, Src: "docs", Hint: docHintSeriesNumber,
+	})
+}
+
+// docDriverLicenseAnchorBefore reports whether a driver-licence cue stands
+// within docAnchorWindow bytes to the left of before and in the same sentence.
+func docDriverLicenseAnchorBefore(ctx *Context, before int) bool {
+	anchorEnd, anchored := docAnchorLeft(ctx.Lower, before, docAnchorsDriverLicense)
+	if !anchored {
+		return false
+	}
+	return !strings.ContainsAny(ctx.Lower[anchorEnd:before], docSentenceEndChars)
 }
 
 // docInnerLabels are the words a shape in this file may swallow while joining a
@@ -930,7 +1029,7 @@ func docNumberContextOK(ctx *Context, anchorEnd, start, end int) bool {
 	if anchorEnd < 0 || anchorEnd > start {
 		return false
 	}
-	if strings.ContainsAny(ctx.Lower[anchorEnd:start], ".\n\r;!?") {
+	if strings.ContainsAny(ctx.Lower[anchorEnd:start], docSentenceEndChars) {
 		return false
 	}
 	if _, noise := docNumberNoiseWords[docWordBefore(ctx, start)]; noise {
@@ -958,7 +1057,7 @@ func docPermitNumberOK(ctx *Context, anchorEnd, start, end int) bool {
 	if anchorEnd < 0 || anchorEnd > start {
 		return false
 	}
-	if strings.ContainsAny(ctx.Lower[anchorEnd:start], ".\n\r;!?") {
+	if strings.ContainsAny(ctx.Lower[anchorEnd:start], docSentenceEndChars) {
 		return false
 	}
 	return docNumberContextOK(ctx, anchorEnd, start, end)
