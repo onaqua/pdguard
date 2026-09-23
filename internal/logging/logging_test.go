@@ -12,6 +12,13 @@ import (
 	"testing"
 )
 
+// logFullName and logPhone are the protected values reused across the
+// scrubbing tests.
+const (
+	logFullName = "Иванов Иван Иванович"
+	logPhone    = "+7 916 123-45-67"
+)
+
 // newTestLogger builds a logger with the same scrubbing wrapper that Setup
 // installs, but writing into a buffer so a test can assert on the bytes that
 // would have gone to stderr.
@@ -38,10 +45,10 @@ func newTestLogger2(w io.Writer) *slog.Logger {
 // record, whatever a careless call site does with them. Every case in this
 // file is checked against all of them.
 var secrets = []string{
-	"Иванов Иван Иванович",
+	logFullName,
 	"4509 123456",
 	"4276 3801 2345 6789",
-	"+7 916 123-45-67",
+	logPhone,
 	"ivanov.ivan@example.com",
 	"770708-1234",
 	"123456789012",
@@ -79,7 +86,7 @@ func TestUnsafeKeyNeverLeaks(t *testing.T) {
 	var buf bytes.Buffer
 	l := newTestLogger(&buf)
 	l.Info("processing", "payload", payload)
-	l.Info("processing", "text", "Иванов Иван Иванович")
+	l.Info("processing", "text", logFullName)
 	l.Info("processing", "raw", "4276 3801 2345 6789")
 	l.Error("parse failed", "err", "invalid input \"+7 916 123-45-67\"")
 	l.Info("nested", slog.Group("ctx", slog.String("body", payload)))
@@ -149,7 +156,7 @@ func TestTypesIsDeterministic(t *testing.T) {
 }
 
 func TestSafeHidesValueButKeepsLength(t *testing.T) {
-	const value = "Иванов Иван Иванович"
+	const value = logFullName
 
 	var buf bytes.Buffer
 	newTestLogger(&buf).LogAttrs(context.Background(), slog.LevelInfo, "m", Safe("fio", value))
@@ -178,8 +185,8 @@ func TestSafeHidesValueButKeepsLength(t *testing.T) {
 }
 
 func TestFingerprintStableAndDistinct(t *testing.T) {
-	a := Fingerprint("+7 916 123-45-67")
-	if a != Fingerprint("+7 916 123-45-67") {
+	a := Fingerprint(logPhone)
+	if a != Fingerprint(logPhone) {
 		t.Fatal("Fingerprint is not deterministic within one process")
 	}
 	if a == Fingerprint("+7 916 123-45-68") {
@@ -236,7 +243,7 @@ func TestScrub(t *testing.T) {
 
 func TestLooksSensitive(t *testing.T) {
 	sensitive := []string{
-		"Иванов Иван Иванович",
+		logFullName,
 		"Ivan Ivanov",
 		"карта 4276",
 		strings.Repeat("a", FreeTextLimit+1),
@@ -360,7 +367,7 @@ func (w *lockedWriter) Write(p []byte) (int, error) {
 
 func BenchmarkFingerprint(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_ = Fingerprint("Иванов Иван Иванович")
+		_ = Fingerprint(logFullName)
 	}
 }
 

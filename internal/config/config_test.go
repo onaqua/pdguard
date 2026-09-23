@@ -11,8 +11,14 @@ import (
 	"pdguard/internal/pd/mask"
 )
 
+const (
+	cfgConfigJSON = "config.json"
+	cfgLoadFmt    = "Load: %v"
+	cfgApplyFmt   = "Apply: %v"
+)
+
 func TestLoadMissingFileFallsBackToDefault(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "absent", "config.json")
+	path := filepath.Join(t.TempDir(), "absent", cfgConfigJSON)
 
 	m, err := Load(path)
 	if err != nil {
@@ -214,7 +220,7 @@ func TestValidateRejectsBadInput(t *testing.T) {
 func TestValidateToleratesEmptyStrategyRegistry(t *testing.T) {
 	m, err := Load("")
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf(cfgLoadFmt, err)
 	}
 	c := Default()
 	r := c.Systems["default"].Types[string(pd.TypeEmail)]
@@ -234,10 +240,10 @@ func TestValidateToleratesEmptyStrategyRegistry(t *testing.T) {
 }
 
 func TestApplySwapsAndPersists(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
+	path := filepath.Join(t.TempDir(), cfgConfigJSON)
 	m, err := Load(path)
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf(cfgLoadFmt, err)
 	}
 	before := m.Get()
 
@@ -247,7 +253,7 @@ func TestApplySwapsAndPersists(t *testing.T) {
 	next.Systems["analytics"].Enabled = false
 
 	if err := m.Apply(next); err != nil {
-		t.Fatalf("Apply: %v", err)
+		t.Fatalf(cfgApplyFmt, err)
 	}
 	after := m.Get()
 	if after == before {
@@ -300,7 +306,7 @@ func assertPersistedConfig(t *testing.T, path string) {
 func TestResolveFallbackAndAllowList(t *testing.T) {
 	m, err := Load("")
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf(cfgLoadFmt, err)
 	}
 	if s, ok := m.Resolve(""); !ok || s.ID != "default" {
 		t.Fatal("an empty system id must fall back to the default system")
@@ -312,7 +318,7 @@ func TestResolveFallbackAndAllowList(t *testing.T) {
 	strict := Default()
 	strict.RequireSystem = true
 	if err := m.Apply(strict); err != nil {
-		t.Fatalf("Apply: %v", err)
+		t.Fatalf(cfgApplyFmt, err)
 	}
 	if _, ok := m.Resolve("ghost"); ok {
 		t.Fatal("with RequireSystem an unknown system must be rejected")
@@ -325,9 +331,9 @@ func TestResolveFallbackAndAllowList(t *testing.T) {
 // Get runs on every request while Apply may land at any moment; the pair must
 // never race or observe a half-built configuration.
 func TestConcurrentGetDuringApply(t *testing.T) {
-	m, err := Load(filepath.Join(t.TempDir(), "config.json"))
+	m, err := Load(filepath.Join(t.TempDir(), cfgConfigJSON))
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf(cfgLoadFmt, err)
 	}
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
@@ -343,7 +349,7 @@ func TestConcurrentGetDuringApply(t *testing.T) {
 		c := Default()
 		c.Server.MaxConcurrent = i
 		if err := m.Apply(c); err != nil {
-			t.Errorf("Apply: %v", err)
+			t.Errorf(cfgApplyFmt, err)
 			break
 		}
 	}

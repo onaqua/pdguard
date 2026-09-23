@@ -7,6 +7,15 @@ import (
 	"pdguard/internal/pd"
 )
 
+const (
+	dttDate12051990  = "12.05.1990"
+	dttDate20062015  = "20.06.2015"
+	dttDate12May1990 = "12 мая 1990"
+	dttDateSpelled   = "двенадцатое мая 1990"
+	dttDatePadded    = "15  /  07  /  1988"
+	dttMaskedFmt     = "%q: masked %v, want %v"
+)
+
 // dateSpans runs only the date detector, so a failure here cannot be caused by
 // a sibling detector registered in another file.
 func dateSpans(t *testing.T, payload string) []pd.Span {
@@ -36,7 +45,7 @@ type datePositiveCase struct {
 
 func TestDateDetectPositive(t *testing.T) {
 	cases := []datePositiveCase{
-		{name: "dotted dmy", in: "Дата рождения: 12.05.1990", want: "12.05.1990",
+		{name: "dotted dmy", in: "Дата рождения: 12.05.1990", want: dttDate12051990,
 			typ: pd.TypeBirthDate, hint: "dmy", conf: 0.90},
 		{name: "slashed dmy", in: "дата рождения 12/05/1990", want: "12/05/1990",
 			typ: pd.TypeBirthDate, hint: "dmy", conf: 0.90},
@@ -60,28 +69,28 @@ func TestDateDetectPositive(t *testing.T) {
 		// The right-hand anchor is the only evidence here, and it is the
 		// longest one in the list: a window too short to hold it silently
 		// demoted this shape below the configured confidence floor.
-		{name: "trailing goda rozhdeniya", in: "Анкета: Иванов Иван Иванович, 12.05.1990 года рождения", want: "12.05.1990",
+		{name: "trailing goda rozhdeniya", in: "Анкета: Иванов Иван Иванович, 12.05.1990 года рождения", want: dttDate12051990,
 			typ: pd.TypeBirthDate, hint: "dmy", conf: 0.85},
 
-		{name: "issue date", in: "Паспорт выдан 20.06.2015", want: "20.06.2015",
+		{name: "issue date", in: "Паспорт выдан 20.06.2015", want: dttDate20062015,
 			typ: pd.TypePassportIssueDate, hint: "dmy", conf: 0.95},
-		{name: "issue date long anchor", in: "Дата выдачи 20.06.2015", want: "20.06.2015",
+		{name: "issue date long anchor", in: "Дата выдачи 20.06.2015", want: dttDate20062015,
 			typ: pd.TypePassportIssueDate, hint: "dmy", conf: 0.95},
-		{name: "issue date english anchor", in: "Passport issued 20.06.2015", want: "20.06.2015",
+		{name: "issue date english anchor", in: "Passport issued 20.06.2015", want: dttDate20062015,
 			typ: pd.TypePassportIssueDate, hint: "dmy", conf: 0.95},
 
 		// The trailing "года" / "г." is NOT part of the span: it is ordinary
 		// text and must survive byte for byte.
-		{name: "textual month keeps the goda tail outside", in: "Родился 12 мая 1990 года", want: "12 мая 1990",
+		{name: "textual month keeps the goda tail outside", in: "Родился 12 мая 1990 года", want: dttDate12May1990,
 			typ: pd.TypeBirthDate, hint: "text", conf: 0.95},
-		{name: "textual month abbreviated tail", in: "родилась 12 мая 1990 г.", want: "12 мая 1990",
+		{name: "textual month abbreviated tail", in: "родилась 12 мая 1990 г.", want: dttDate12May1990,
 			typ: pd.TypeBirthDate, hint: "text", conf: 0.95},
 		{name: "textual month genitive with issue anchor", in: "паспорт выдан 12 января 2015 года", want: "12 января 2015",
 			typ: pd.TypePassportIssueDate, hint: "text", conf: 0.95},
 		{name: "textual month two digit year", in: "дата рождения 12 мая 90", want: "12 мая 90",
 			typ: pd.TypeBirthDate, hint: "text", conf: 0.95},
 
-		{name: "spelled out day", in: "Дата рождения: двенадцатое мая 1990 года", want: "двенадцатое мая 1990",
+		{name: "spelled out day", in: "Дата рождения: двенадцатое мая 1990 года", want: dttDateSpelled,
 			typ: pd.TypeBirthDate, hint: "words", conf: 0.95},
 		{name: "spelled out compound day", in: "Дата рождения: двадцать первое мая 1990 года", want: "двадцать первое мая 1990",
 			typ: pd.TypeBirthDate, hint: "words", conf: 0.95},
@@ -102,7 +111,7 @@ func TestDateDetectPositive(t *testing.T) {
 		// Separators padded with whitespace, as a form filled in by hand
 		// writes them. The padding is inside the span because it is inside
 		// the date.
-		{name: "padded slashes", in: "Дата рождения: 15  /  07  /  1988 года.", want: "15  /  07  /  1988",
+		{name: "padded slashes", in: "Дата рождения: 15  /  07  /  1988 года.", want: dttDatePadded,
 			typ: pd.TypeBirthDate, hint: "dmy", conf: 0.95},
 		{name: "padded dashes", in: "Паспорт выдан 20 - 06 - 2015 отделением", want: "20 - 06 - 2015",
 			typ: pd.TypePassportIssueDate, hint: "dmy", conf: 0.95},
@@ -111,15 +120,15 @@ func TestDateDetectPositive(t *testing.T) {
 			typ: pd.TypeBirthDate, hint: "text", conf: 0.90},
 		{name: "bare year with gr", in: "Клиент 1990 г.р.", want: "1990",
 			typ: pd.TypeBirthDate, hint: "text", conf: 0.90},
-		{name: "full date wins over the bare year inside it", in: "12.05.1990 г.р.", want: "12.05.1990",
+		{name: "full date wins over the bare year inside it", in: "12.05.1990 г.р.", want: dttDate12051990,
 			typ: pd.TypeBirthDate, hint: "dmy", conf: 0.85},
 
 		// 0.78 - 0.05 ambiguity penalty. The penalty must not push this branch
 		// below the 0.7 floor the configuration applies, or the whole "date
 		// straight after a name" reading would only ever work for days 13..31.
-		{name: "date right after a full name", in: "Иванов Иван Иванович 12.05.1990", want: "12.05.1990",
+		{name: "date right after a full name", in: "Иванов Иван Иванович 12.05.1990", want: dttDate12051990,
 			typ: pd.TypeBirthDate, hint: "dmy", conf: 0.73},
-		{name: "bare plausible date defaults to birth date", in: "12.05.1990", want: "12.05.1990",
+		{name: "bare plausible date defaults to birth date", in: dttDate12051990, want: dttDate12051990,
 			typ: pd.TypeBirthDate, hint: "dmy", conf: 0.55},
 
 		{name: "case insensitive anchor", in: "ДАТА РОЖДЕНИЯ 25.05.1990", want: "25.05.1990",
@@ -268,8 +277,8 @@ func TestDateSpansStayInsideText(t *testing.T) {
 	if s.Start < 0 || s.End > len(in) || s.Start >= s.End {
 		t.Fatalf("span %+v out of range for %d bytes", s, len(in))
 	}
-	if in[s.Start:s.End] != "двенадцатое мая 1990" {
-		t.Fatalf("span covers %q, want %q", in[s.Start:s.End], "двенадцатое мая 1990")
+	if in[s.Start:s.End] != dttDateSpelled {
+		t.Fatalf("span covers %q, want %q", in[s.Start:s.End], dttDateSpelled)
 	}
 }
 
@@ -420,7 +429,7 @@ func TestDateAnchorPropagation(t *testing.T) {
 		{
 			name: "three spellings behind one anchor",
 			in:   "Дата рождения 12.05.1990, второй вариант 1990.12.05, третий 12 мая 1990 года",
-			want: []string{"12.05.1990", "1990.12.05", "12 мая 1990"},
+			want: []string{dttDate12051990, "1990.12.05", dttDate12May1990},
 		},
 		{
 			name: "enumeration of birth dates",
@@ -430,7 +439,7 @@ func TestDateAnchorPropagation(t *testing.T) {
 		{
 			name: "range keeps both ends",
 			in:   "Дата рождения указана в диапазоне с 12.05.1990 по 20.06.1990",
-			want: []string{"12.05.1990", "20.06.1990"},
+			want: []string{dttDate12051990, "20.06.1990"},
 		},
 	}
 	for _, tc := range cases {
@@ -454,18 +463,18 @@ func TestDatePropagationStaysLocal(t *testing.T) {
 		{
 			name: "business date in the same sentence is not a birth date",
 			in:   "Дата рождения 12.05.1990, заявление подано 01.09.2005",
-			want: []string{"12.05.1990"},
+			want: []string{dttDate12051990},
 		},
 		{
 			name: "a sentence boundary stops propagation",
 			in:   "Дата рождения 12.05.1990. Полис оформлен на срок, указанный ниже 01.02.2005",
-			want: []string{"12.05.1990"},
+			want: []string{dttDate12051990},
 		},
 		{
 			name: "a date too far away is not borrowed",
 			in: "Дата рождения 12.05.1990, далее следует пространное описание обстоятельств " +
 				"дела и перечень приложенных документов, а затем 01.02.2005",
-			want: []string{"12.05.1990"},
+			want: []string{dttDate12051990},
 		},
 		{
 			// The bare date sits outside the reach of "выдан" but inside the
@@ -509,9 +518,9 @@ func TestDateExtraForms(t *testing.T) {
 		in   string
 		want []string
 	}{
-		{"abbreviated rod", "род. 12.05.1990", []string{"12.05.1990"}},
-		{"abbreviated dr", "д.р. 12.05.1990", []string{"12.05.1990"}},
-		{"glued gr", "Клиент 12.05.1990г.р.", []string{"12.05.1990"}},
+		{"abbreviated rod", "род. 12.05.1990", []string{dttDate12051990}},
+		{"abbreviated dr", "д.р. 12.05.1990", []string{dttDate12051990}},
+		{"glued gr", "Клиент 12.05.1990г.р.", []string{dttDate12051990}},
 		{"glued bare year", "Клиент 1990г.р.", []string{"1990"}},
 		{"two digit year with gr", "12.05.90 г.р.", []string{"12.05.90"}},
 		{"bare year gr", "Клиент 1990 г.р.", []string{"1990"}},
@@ -527,16 +536,16 @@ func TestDateExtraForms(t *testing.T) {
 		// Both ends of a range are dates: the left-context window reaches the
 		// second one directly, without any need for propagation.
 		{"issue date range", "паспорт выдан 20.06.2015, продлён 21.07.2015",
-			[]string{"20.06.2015", "21.07.2015"}},
+			[]string{dttDate20062015, "21.07.2015"}},
 		{"birth date range", "дата рождения от 12.05.1990 до 20.06.1990",
-			[]string{"12.05.1990", "20.06.1990"}},
+			[]string{dttDate12051990, "20.06.1990"}},
 		{"parenthesised right anchor", "Анкета 12.05.1990 (дата рождения)",
-			[]string{"12.05.1990"}},
+			[]string{dttDate12051990}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := dateCovered(t, tc.in); !dateEqual(got, tc.want) {
-				t.Errorf("%q: masked %v, want %v", tc.in, got, tc.want)
+				t.Errorf(dttMaskedFmt, tc.in, got, tc.want)
 			}
 		})
 	}
@@ -704,7 +713,7 @@ func TestDateWordYearForms(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := dateCovered(t, tc.in); !dateEqual(got, tc.want) {
-				t.Errorf("%q: masked %v, want %v", tc.in, got, tc.want)
+				t.Errorf(dttMaskedFmt, tc.in, got, tc.want)
 			}
 		})
 	}
@@ -723,12 +732,12 @@ func TestDateSeparatorPadding(t *testing.T) {
 		in   string
 		want []string
 	}{
-		{"padded slashes", "Дата рождения: 15  /  07  /  1988 года.", []string{"15  /  07  /  1988"}},
+		{"padded slashes", "Дата рождения: 15  /  07  /  1988 года.", []string{dttDatePadded}},
 		{"padded dots", "Дата рождения 12 . 05 . 1990", []string{"12 . 05 . 1990"}},
 		{"padded dashes", "Паспорт выдан 20 - 06 - 2015", []string{"20 - 06 - 2015"}},
 		{"uneven padding", "Дата рождения 12 -  05 - 1990", []string{"12 -  05 - 1990"}},
 		{"tabs pad a separator too", "Дата рождения 15\t/\t07\t/\t1988", []string{"15\t/\t07\t/\t1988"}},
-		{"padding with a right anchor", "Анкета: 15  /  07  /  1988 г.р.", []string{"15  /  07  /  1988"}},
+		{"padding with a right anchor", "Анкета: 15  /  07  /  1988 г.р.", []string{dttDatePadded}},
 
 		{"four spaces are past the limit", "Дата рождения: 15    /    07    /    1988", nil},
 		{"whitespace alone never pads", "Дата рождения 15  07  1988", nil},
@@ -742,7 +751,7 @@ func TestDateSeparatorPadding(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := dateCovered(t, tc.in); !dateEqual(got, tc.want) {
-				t.Errorf("%q: masked %v, want %v", tc.in, got, tc.want)
+				t.Errorf(dttMaskedFmt, tc.in, got, tc.want)
 			}
 		})
 	}
@@ -755,7 +764,7 @@ func TestDateSeparatorPadding(t *testing.T) {
 // date behind an abbreviated anchor.
 func TestDateChainedLooksPastAnAbbreviation(t *testing.T) {
 	for _, in := range []string{"род. 12.05.1990", "д.р. 12.05.1990", "рожд. 12.05.1990"} {
-		if got := dateCovered(t, in); !dateEqual(got, []string{"12.05.1990"}) {
+		if got := dateCovered(t, in); !dateEqual(got, []string{dttDate12051990}) {
 			t.Errorf("%q: masked %v, want [12.05.1990]", in, got)
 		}
 	}

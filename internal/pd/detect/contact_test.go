@@ -9,6 +9,14 @@ import (
 	"pdguard/internal/pd"
 )
 
+const (
+	cttEmailPetrov = "ivan.petrov@mail.ru"
+	cttEmailIvan   = "ivan@mail.ru"
+	cttPhone916    = "+7 916 123-45-67"
+	cttPhone495    = "+7 495 123-45-67"
+	cttPhone8      = "8-916-123-45-67"
+)
+
 // wantContact is the observable part of a span: the exact substring it covers,
 // its type and its confidence. Offsets are checked indirectly through the
 // substring, which is what actually matters for masking.
@@ -64,12 +72,12 @@ func TestContactEmailPositive(t *testing.T) {
 		{
 			name:    "plain address",
 			payload: "Мой адрес ivan.petrov@mail.ru для связи.",
-			want:    []wantContact{{"ivan.petrov@mail.ru", pd.TypeEmail, contactConfEmail}},
+			want:    []wantContact{{cttEmailPetrov, pd.TypeEmail, contactConfEmail}},
 		},
 		{
 			name:    "sentence dot is not part of the address",
 			payload: "Пишите на ivan@mail.ru.",
-			want:    []wantContact{{"ivan@mail.ru", pd.TypeEmail, contactConfEmail}},
+			want:    []wantContact{{cttEmailIvan, pd.TypeEmail, contactConfEmail}},
 		},
 		{
 			name:    "uppercase is matched, original case is reported",
@@ -89,7 +97,7 @@ func TestContactEmailPositive(t *testing.T) {
 		{
 			name:    "leading dot stays outside the address",
 			payload: "письмо.ivan@mail.ru",
-			want:    []wantContact{{"ivan@mail.ru", pd.TypeEmail, contactConfEmail}},
+			want:    []wantContact{{cttEmailIvan, pd.TypeEmail, contactConfEmail}},
 		},
 		{
 			name:    "two addresses in one line",
@@ -114,7 +122,7 @@ func TestContactPhonePositive(t *testing.T) {
 		{
 			name:    "plus seven spaced",
 			payload: "Телефон +7 916 123-45-67 рабочий.",
-			want:    []wantContact{{"+7 916 123-45-67", pd.TypePhone, contactConfPhonePlus7}},
+			want:    []wantContact{{cttPhone916, pd.TypePhone, contactConfPhonePlus7}},
 		},
 		{
 			name:    "plus seven with parentheses",
@@ -124,7 +132,7 @@ func TestContactPhonePositive(t *testing.T) {
 		{
 			name:    "city code",
 			payload: "Звоните: +7 495 123-45-67",
-			want:    []wantContact{{"+7 495 123-45-67", pd.TypePhone, contactConfPhonePlus7}},
+			want:    []wantContact{{cttPhone495, pd.TypePhone, contactConfPhonePlus7}},
 		},
 		{
 			name:    "eight spaced groups",
@@ -138,8 +146,8 @@ func TestContactPhonePositive(t *testing.T) {
 		},
 		{
 			name:    "eight hyphenated",
-			payload: "8-916-123-45-67",
-			want:    []wantContact{{"8-916-123-45-67", pd.TypePhone, contactConfPhonePlus7}},
+			payload: cttPhone8,
+			want:    []wantContact{{cttPhone8, pd.TypePhone, contactConfPhonePlus7}},
 		},
 		{
 			name:    "seven without plus",
@@ -170,8 +178,8 @@ func TestContactPhonePositive(t *testing.T) {
 			name:    "email and phone in one payload",
 			payload: "ivan@mail.ru, тел +7 916 123-45-67",
 			want: []wantContact{
-				{"ivan@mail.ru", pd.TypeEmail, contactConfEmail},
-				{"+7 916 123-45-67", pd.TypePhone, contactConfPhonePlus7},
+				{cttEmailIvan, pd.TypeEmail, contactConfEmail},
+				{cttPhone916, pd.TypePhone, contactConfPhonePlus7},
 			},
 		},
 	}
@@ -293,10 +301,10 @@ func TestContactPhoneSeparatorStyles(t *testing.T) {
 // its first two and last two characters and so survives the mask untouched.
 func TestContactPhoneWithExtension(t *testing.T) {
 	cases := []struct{ payload, want string }{
-		{"Телефон +7 495 123-45-67 доб. 123", "+7 495 123-45-67"},
+		{"Телефон +7 495 123-45-67 доб. 123", cttPhone495},
 		{"Тел. 8 (495) 123-45-67 доб 4501", "8 (495) 123-45-67"},
-		{"телефон +7 495 123-45-67, добавочный 12", "+7 495 123-45-67"},
-		{"call +7 495 123-45-67 ext. 7", "+7 495 123-45-67"},
+		{"телефон +7 495 123-45-67, добавочный 12", cttPhone495},
+		{"call +7 495 123-45-67 ext. 7", cttPhone495},
 	}
 	for _, c := range cases {
 		t.Run(c.want, func(t *testing.T) {
@@ -318,7 +326,7 @@ func TestContactPhoneLists(t *testing.T) {
 			name:    "comma separated",
 			payload: "Телефоны: +7 916 123-45-67, +7 916 765-43-21",
 			want: []wantContact{
-				{"+7 916 123-45-67", pd.TypePhone, contactConfPhonePlus7},
+				{cttPhone916, pd.TypePhone, contactConfPhonePlus7},
 				{"+7 916 765-43-21", pd.TypePhone, contactConfPhonePlus7},
 			},
 		},
@@ -326,7 +334,7 @@ func TestContactPhoneLists(t *testing.T) {
 			name:    "slash separated",
 			payload: "Тел: 8-916-123-45-67 / 8-495-111-22-33",
 			want: []wantContact{
-				{"8-916-123-45-67", pd.TypePhone, contactConfPhonePlus7},
+				{cttPhone8, pd.TypePhone, contactConfPhonePlus7},
 				{"8-495-111-22-33", pd.TypePhone, contactConfPhonePlus7},
 			},
 		},
@@ -360,22 +368,22 @@ func TestContactEmailShapes(t *testing.T) {
 		{
 			name:    "angle brackets",
 			payload: "Пишите на <ivan@mail.ru>, ответим завтра.",
-			want:    []wantContact{{"ivan@mail.ru", pd.TypeEmail, contactConfEmail}},
+			want:    []wantContact{{cttEmailIvan, pd.TypeEmail, contactConfEmail}},
 		},
 		{
 			name:    "double quotes",
 			payload: "адрес \"ivan.petrov@mail.ru\" указан в анкете",
-			want:    []wantContact{{"ivan.petrov@mail.ru", pd.TypeEmail, contactConfEmail}},
+			want:    []wantContact{{cttEmailPetrov, pd.TypeEmail, contactConfEmail}},
 		},
 		{
 			name:    "closing parenthesis",
 			payload: "(контакт: ivan@mail.ru)",
-			want:    []wantContact{{"ivan@mail.ru", pd.TypeEmail, contactConfEmail}},
+			want:    []wantContact{{cttEmailIvan, pd.TypeEmail, contactConfEmail}},
 		},
 		{
 			name:    "trailing comma",
 			payload: "ivan@mail.ru, Иван Петров",
-			want:    []wantContact{{"ivan@mail.ru", pd.TypeEmail, contactConfEmail}},
+			want:    []wantContact{{cttEmailIvan, pd.TypeEmail, contactConfEmail}},
 		},
 		{
 			name:    "plus addressing on a deep subdomain",
@@ -385,7 +393,7 @@ func TestContactEmailShapes(t *testing.T) {
 		{
 			name:    "mailto prefix stays outside the address",
 			payload: "mailto:ivan.petrov@mail.ru",
-			want:    []wantContact{{"ivan.petrov@mail.ru", pd.TypeEmail, contactConfEmail}},
+			want:    []wantContact{{cttEmailPetrov, pd.TypeEmail, contactConfEmail}},
 		},
 		{
 			name:    "digits only local part",

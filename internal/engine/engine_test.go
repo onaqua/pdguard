@@ -13,6 +13,12 @@ import (
 	"pdguard/internal/store"
 )
 
+const (
+	engOpFmt      = "op = %q, want %q"
+	engProcessFmt = "Process: %v"
+	engMaskFmt    = "Mask: %v"
+)
+
 // Payloads used across the tests. They were chosen against the real detectors
 // (see the confidences quoted in the comments) so a test failure points at the
 // engine, not at a detector that happens to disagree about a sample.
@@ -93,7 +99,7 @@ func TestDirectionFirstCallMasks(t *testing.T) {
 
 	res := mustProcess(t, e, "p1", pdPayload)
 	if res.Op != OpMask {
-		t.Fatalf("op = %q, want %q", res.Op, OpMask)
+		t.Fatalf(engOpFmt, res.Op, OpMask)
 	}
 	if res.Cached {
 		t.Error("first call reported Cached")
@@ -121,7 +127,7 @@ func TestDirectionSecondCallDemasks(t *testing.T) {
 	back := mustProcess(t, e, "p2", masked.Output)
 
 	if back.Op != OpDemask {
-		t.Fatalf("op = %q, want %q", back.Op, OpDemask)
+		t.Fatalf(engOpFmt, back.Op, OpDemask)
 	}
 	if !back.Cached {
 		t.Error("demasking from the store did not report Cached")
@@ -169,7 +175,7 @@ func TestDirectionReusedIDRemasks(t *testing.T) {
 	second := mustProcess(t, e, "p4", pdPayloadAlt)
 
 	if second.Op != OpMask {
-		t.Fatalf("op = %q, want %q", second.Op, OpMask)
+		t.Fatalf(engOpFmt, second.Op, OpMask)
 	}
 	if second.Cached {
 		t.Error("a fresh masking reported Cached")
@@ -293,7 +299,7 @@ func TestDemaskDisabledSystemStoresNothing(t *testing.T) {
 
 	res, err := e.Process(context.Background(), "analytics", "a1", pdPayload)
 	if err != nil {
-		t.Fatalf("Process: %v", err)
+		t.Fatalf(engProcessFmt, err)
 	}
 	if res.Output == pdPayload {
 		t.Fatal("masking did nothing")
@@ -490,7 +496,7 @@ func TestExplicitDirectionsMatchProcess(t *testing.T) {
 	viaProcess := mustProcess(t, e, "x", pdPayload)
 	viaMask, err := e.Mask(context.Background(), "", "y", pdPayload)
 	if err != nil {
-		t.Fatalf("Mask: %v", err)
+		t.Fatalf(engMaskFmt, err)
 	}
 	if viaMask.Output != viaProcess.Output {
 		t.Errorf("Mask and Process disagree:\n %q\n %q", viaMask.Output, viaProcess.Output)
@@ -515,11 +521,11 @@ func TestMaskingIsDeterministic(t *testing.T) {
 
 	a, err := e.Mask(context.Background(), "", "k1", pdPayload)
 	if err != nil {
-		t.Fatalf("Mask: %v", err)
+		t.Fatalf(engMaskFmt, err)
 	}
 	b, err := other.Mask(context.Background(), "", "k2", pdPayload)
 	if err != nil {
-		t.Fatalf("Mask: %v", err)
+		t.Fatalf(engMaskFmt, err)
 	}
 	if a.Output != b.Output {
 		t.Errorf("two engines produced different masks:\n %q\n %q", a.Output, b.Output)
@@ -620,7 +626,7 @@ func TestRememberIdentityMakesFailOpenReversible(t *testing.T) {
 
 	res, err := eng.Process(context.Background(), "", id, pdPayload)
 	if err != nil {
-		t.Fatalf("Process: %v", err)
+		t.Fatalf(engProcessFmt, err)
 	}
 	if res.Output != pdPayload {
 		t.Fatalf("reverse step returned %q, want the payload byte for byte", res.Output)
@@ -631,12 +637,12 @@ func TestRememberIdentityMakesFailOpenReversible(t *testing.T) {
 	eng2, _ := newEngine(t)
 	masked, err := eng2.Mask(context.Background(), "", id, pdPayload)
 	if err != nil {
-		t.Fatalf("Mask: %v", err)
+		t.Fatalf(engMaskFmt, err)
 	}
 	eng2.RememberIdentity("", id, pdPayload)
 	back, err := eng2.Process(context.Background(), "", id, masked.Output)
 	if err != nil {
-		t.Fatalf("Process: %v", err)
+		t.Fatalf(engProcessFmt, err)
 	}
 	if back.Output != pdPayload {
 		t.Fatalf("demask returned %q, want the original", back.Output)

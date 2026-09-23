@@ -15,6 +15,14 @@ import (
 	"pdguard/internal/store"
 )
 
+const (
+	httpConfigLoadFmt  = "config.Load: %v"
+	httpConfigApplyFmt = "config.Apply: %v"
+	httpRetryID        = "retry-1"
+	httpSecretToken    = "s3cret-token"
+	httpDemoKey        = "demo-key-analytics"
+)
+
 // sampleText is a payload that every layer must agree on: it carries a full
 // Russian name and a card number, so masking is guaranteed to change something
 // and the round trip is a real assertion rather than a tautology.
@@ -27,13 +35,13 @@ func newTestServer(t *testing.T, tune func(*config.Config)) (*Server, store.Stor
 	t.Helper()
 	mgr, err := config.Load("")
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf(httpConfigLoadFmt, err)
 	}
 	if tune != nil {
 		c := mgr.Get().Clone()
 		tune(c)
 		if err := mgr.Apply(c); err != nil {
-			t.Fatalf("config.Apply: %v", err)
+			t.Fatalf(httpConfigApplyFmt, err)
 		}
 	}
 	st := store.New(store.Config{Shards: 8, TTL: time.Minute, MaxEntries: 1000, MaxValueBytes: 1 << 20, SweepInterval: -1})
@@ -122,12 +130,12 @@ func TestPayloadIDIsCaseInsensitive(t *testing.T) {
 func TestForwardRetryIsIdempotent(t *testing.T) {
 	s, _ := newTestServer(t, nil)
 
-	first := processCall(t, s, "retry-1", sampleText)
-	second := processCall(t, s, "retry-1", sampleText)
+	first := processCall(t, s, httpRetryID, sampleText)
+	second := processCall(t, s, httpRetryID, sampleText)
 	if first != second {
 		t.Fatalf("retry produced a different mask:\n got %q\nwant %q", second, first)
 	}
-	if restored := processCall(t, s, "retry-1", first); restored != sampleText {
+	if restored := processCall(t, s, httpRetryID, first); restored != sampleText {
 		t.Fatalf("demasking after a retry is not exact: %q", restored)
 	}
 }
@@ -277,7 +285,7 @@ func TestResponseKeepsCyrillicUnescaped(t *testing.T) {
 // TestAdminConfigRedactsSecrets is the privacy guard on the admin surface: the
 // configuration is useful to read, the credentials in it are not.
 func TestAdminConfigRedactsSecrets(t *testing.T) {
-	s, _ := newTestServer(t, func(c *config.Config) { c.Server.AdminToken = "s3cret-token" })
+	s, _ := newTestServer(t, func(c *config.Config) { c.Server.AdminToken = httpSecretToken })
 
 	req := httptest.NewRequest(http.MethodGet, pathAdminConfig, nil)
 	rec := httptest.NewRecorder()
@@ -287,14 +295,14 @@ func TestAdminConfigRedactsSecrets(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, pathAdminConfig, nil)
-	req.Header.Set(HeaderAdminToken, "s3cret-token")
+	req.Header.Set(HeaderAdminToken, httpSecretToken)
 	rec = httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /admin/config: got %d, body %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if strings.Contains(body, "s3cret-token") || strings.Contains(body, "demo-key-analytics") {
+	if strings.Contains(body, httpSecretToken) || strings.Contains(body, httpDemoKey) {
 		t.Fatalf("/admin/config leaked a secret: %s", body)
 	}
 	if !strings.Contains(body, redacted) {
@@ -303,16 +311,16 @@ func TestAdminConfigRedactsSecrets(t *testing.T) {
 
 	// A round trip must not destroy the keys the GET refused to show.
 	put := httptest.NewRequest(http.MethodPut, pathAdminConfig, strings.NewReader(body))
-	put.Header.Set(HeaderAdminToken, "s3cret-token")
+	put.Header.Set(HeaderAdminToken, httpSecretToken)
 	rec = httptest.NewRecorder()
 	s.ServeHTTP(rec, put)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT /admin/config: got %d, body %s", rec.Code, rec.Body.String())
 	}
-	if got := s.cfg.Get().Server.AdminToken; got != "s3cret-token" {
+	if got := s.cfg.Get().Server.AdminToken; got != httpSecretToken {
 		t.Fatalf("admin token after round trip: got %q, want the original", got)
 	}
-	if sys, ok := s.cfg.Get().System("analytics"); !ok || sys.APIKey != "demo-key-analytics" {
+	if sys, ok := s.cfg.Get().System("analytics"); !ok || sys.APIKey != httpDemoKey {
 		t.Fatalf("api key was destroyed by a round trip: %+v", sys)
 	}
 }
@@ -367,7 +375,7 @@ func TestRequireSystemGate(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodPost, pathProcess, strings.NewReader(body))
 	req.Header.Set(HeaderSystemID, "ANALYTICS") // identification is case-insensitive
-	req.Header.Set(HeaderAPIKey, "demo-key-analytics")
+	req.Header.Set(HeaderAPIKey, httpDemoKey)
 	rec = httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -397,12 +405,12 @@ func (g *gateStore) Get(id string) (store.Entry, bool) {
 func TestConcurrencyLimitSheds429(t *testing.T) {
 	mgr, err := config.Load("")
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf(httpConfigLoadFmt, err)
 	}
 	c := mgr.Get().Clone()
 	c.Server.MaxConcurrent = 1
 	if err := mgr.Apply(c); err != nil {
-		t.Fatalf("config.Apply: %v", err)
+		t.Fatalf(httpConfigApplyFmt, err)
 	}
 
 	inner := store.New(store.Config{Shards: 4, TTL: time.Minute, MaxEntries: 100, MaxValueBytes: 1 << 20, SweepInterval: -1})
@@ -512,13 +520,13 @@ func TestBufferPoolIsReused(t *testing.T) {
 func TestFailOpenRemembersIdentityMapping(t *testing.T) {
 	mgr, err := config.Load("")
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf(httpConfigLoadFmt, err)
 	}
 	c := mgr.Get().Clone()
 	c.Server.FailOpen = true
 	c.Server.ProcessTimeout = time.Nanosecond // guarantees the forward step fails
 	if err := mgr.Apply(c); err != nil {
-		t.Fatalf("config.Apply: %v", err)
+		t.Fatalf(httpConfigApplyFmt, err)
 	}
 	st := store.New(store.Config{Shards: 4, TTL: time.Minute, MaxEntries: 100, MaxValueBytes: 1 << 20, SweepInterval: -1})
 	t.Cleanup(st.Close)
@@ -533,7 +541,7 @@ func TestFailOpenRemembersIdentityMapping(t *testing.T) {
 	c = mgr.Get().Clone()
 	c.Server.ProcessTimeout = 5 * time.Second
 	if err := mgr.Apply(c); err != nil {
-		t.Fatalf("config.Apply: %v", err)
+		t.Fatalf(httpConfigApplyFmt, err)
 	}
 
 	back := processCall(t, s, "req-fail", sampleText)

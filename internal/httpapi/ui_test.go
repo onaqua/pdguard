@@ -8,6 +8,8 @@ import (
 	"testing"
 )
 
+const uiDoctype = "<!doctype html"
+
 // getUI performs a GET against the server and returns the recorded response.
 func getUI(t *testing.T, s *Server, path string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -32,7 +34,7 @@ func TestDemoPageIsServed(t *testing.T) {
 			t.Fatalf("GET %s: Content-Type %q, want %q", path, ct, contentTypeHTML)
 		}
 		body := rec.Body.String()
-		if !strings.HasPrefix(strings.TrimSpace(body), "<!doctype html") {
+		if !strings.HasPrefix(strings.TrimSpace(body), uiDoctype) {
 			t.Fatalf("GET %s: body does not start with a doctype: %.60s", path, body)
 		}
 		if n, _ := strconv.Atoi(rec.Header().Get("Content-Length")); n != len(body) {
@@ -102,7 +104,7 @@ func TestCatchAllRouteDoesNotSwallowAPIRoutes(t *testing.T) {
 		if r.Code != http.StatusOK {
 			t.Fatalf("GET %s: status %d, want 200", path, r.Code)
 		}
-		if strings.Contains(r.Body.String(), "<!doctype html") {
+		if strings.Contains(r.Body.String(), uiDoctype) {
 			t.Fatalf("GET %s served the demo page instead of its own response", path)
 		}
 	}
@@ -129,7 +131,7 @@ func TestUnknownPathIsStillNotFound(t *testing.T) {
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("GET %s: status %d, want 404", path, rec.Code)
 		}
-		if strings.Contains(rec.Body.String(), "<!doctype html") {
+		if strings.Contains(rec.Body.String(), uiDoctype) {
 			t.Fatalf("GET %s served the demo page instead of a 404", path)
 		}
 	}

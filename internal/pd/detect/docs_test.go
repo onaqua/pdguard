@@ -7,6 +7,13 @@ import (
 	"pdguard/internal/pd"
 )
 
+const (
+	dtDriver9902 = "9902 123456"
+	dtSnils      = "112-233-445 95"
+	dtAB1234567  = "АБ 1234567"
+	dt77AA123456 = "77 АА 123456"
+)
+
 // wantDoc is the observable part of a span: the exact substring it covers, its
 // type and its confidence. Offsets are checked indirectly through the
 // substring, which is what actually matters for masking.
@@ -62,7 +69,7 @@ func TestDocsPositive(t *testing.T) {
 		{
 			name:    "driver license grouped",
 			payload: "Водительское удостоверение 9902 123456 выдано в 2019 году.",
-			want:    []wantDoc{{"9902 123456", pd.TypeDriverLicense, docConfAnchored}},
+			want:    []wantDoc{{dtDriver9902, pd.TypeDriverLicense, docConfAnchored}},
 		},
 		{
 			name:    "driver license split series",
@@ -77,7 +84,7 @@ func TestDocsPositive(t *testing.T) {
 		{
 			name:    "driver license uppercase anchor",
 			payload: "ВОДИТЕЛЬСКОЕ УДОСТОВЕРЕНИЕ 9902 123456",
-			want:    []wantDoc{{"9902 123456", pd.TypeDriverLicense, docConfAnchored}},
+			want:    []wantDoc{{dtDriver9902, pd.TypeDriverLicense, docConfAnchored}},
 		},
 		{
 			name:    "driver license old cyrillic series",
@@ -87,7 +94,7 @@ func TestDocsPositive(t *testing.T) {
 		{
 			name:    "snils grouped with valid checksum",
 			payload: "СНИЛС 112-233-445 95 подтверждён.",
-			want:    []wantDoc{{"112-233-445 95", pd.TypeSNILS, docConfChecksum}},
+			want:    []wantDoc{{dtSnils, pd.TypeSNILS, docConfChecksum}},
 		},
 		{
 			name:    "snils fully hyphenated",
@@ -132,7 +139,7 @@ func TestDocsPositive(t *testing.T) {
 		{
 			name:    "military id",
 			payload: "Военный билет АБ 1234567",
-			want:    []wantDoc{{"АБ 1234567", pd.TypeMilitaryID, docConfAnchored}},
+			want:    []wantDoc{{dtAB1234567, pd.TypeMilitaryID, docConfAnchored}},
 		},
 		{
 			name:    "military id with number sign",
@@ -162,24 +169,24 @@ func TestDocsPositive(t *testing.T) {
 		{
 			name:    "driver license inflected anchor",
 			payload: "Реквизиты водительского удостоверения 9902 123456",
-			want:    []wantDoc{{"9902 123456", pd.TypeDriverLicense, docConfAnchored}},
+			want:    []wantDoc{{dtDriver9902, pd.TypeDriverLicense, docConfAnchored}},
 		},
 		{
 			name:    "driver license genitive noun anchor",
 			payload: "Удостоверения водителя 9902 123456 нет в деле",
-			want:    []wantDoc{{"9902 123456", pd.TypeDriverLicense, docConfAnchored}},
+			want:    []wantDoc{{dtDriver9902, pd.TypeDriverLicense, docConfAnchored}},
 		},
 		{
 			// Pre-2011 licences print the region code in front of the Cyrillic
 			// series; the short rule must not also claim the tail of it.
 			name:    "driver license region and cyrillic series",
 			payload: "Водительское удостоверение 77 АА 123456",
-			want:    []wantDoc{{"77 АА 123456", pd.TypeDriverLicense, docConfAnchored}},
+			want:    []wantDoc{{dt77AA123456, pd.TypeDriverLicense, docConfAnchored}},
 		},
 		{
 			name:    "driver license abbreviated anchor",
 			payload: "Вод. удостоверение 77 АА 123456",
-			want:    []wantDoc{{"77 АА 123456", pd.TypeDriverLicense, docConfAnchored}},
+			want:    []wantDoc{{dt77AA123456, pd.TypeDriverLicense, docConfAnchored}},
 		},
 		{
 			name:    "snils grouped with spaces only",
@@ -194,7 +201,7 @@ func TestDocsPositive(t *testing.T) {
 		{
 			name:    "pension certificate is the same number",
 			payload: "Пенсионное свидетельство 112-233-445 95",
-			want:    []wantDoc{{"112-233-445 95", pd.TypeSNILS, docConfChecksum}},
+			want:    []wantDoc{{dtSnils, pd.TypeSNILS, docConfChecksum}},
 		},
 		{
 			name:    "foreign passport with a numero sign",
@@ -204,7 +211,7 @@ func TestDocsPositive(t *testing.T) {
 		{
 			name:    "oms policy of the old pattern",
 			payload: "Полис ОМС АБ 1234567",
-			want:    []wantDoc{{"АБ 1234567", pd.TypeOMS, docConfAnchored}},
+			want:    []wantDoc{{dtAB1234567, pd.TypeOMS, docConfAnchored}},
 		},
 		{
 			name:    "oms policy with a six digit number",
@@ -220,8 +227,8 @@ func TestDocsPositive(t *testing.T) {
 			name:    "two documents in one sentence",
 			payload: "СНИЛС 112-233-445 95, военный билет АБ 1234567.",
 			want: []wantDoc{
-				{"112-233-445 95", pd.TypeSNILS, docConfChecksum},
-				{"АБ 1234567", pd.TypeMilitaryID, docConfAnchored},
+				{dtSnils, pd.TypeSNILS, docConfChecksum},
+				{dtAB1234567, pd.TypeMilitaryID, docConfAnchored},
 			},
 		},
 	}
@@ -440,7 +447,7 @@ func TestDocsDriverLicenseSeparatingWords(t *testing.T) {
 			// span: it is part of the document number, not a caption.
 			"old region series is not a label",
 			"Водительское удостоверение 77 АА 123456 старого образца.",
-			[]wantDoc{{"77 АА 123456", pd.TypeDriverLicense, docConfAnchored}},
+			[]wantDoc{{dt77AA123456, pd.TypeDriverLicense, docConfAnchored}},
 		},
 		{
 			"foreign passport takes the same labels",

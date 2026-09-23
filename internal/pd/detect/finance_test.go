@@ -9,6 +9,8 @@ import (
 	"pdguard/internal/pd"
 )
 
+const fintCard4111 = "4111 1111 1111 1111"
+
 // wantFin is the observable part of a span: the exact substring it covers, its
 // type, its confidence and the sub-shape hint. Offsets are checked indirectly
 // through the substring, which is what actually matters for masking.
@@ -73,7 +75,7 @@ func TestFinanceCardPositive(t *testing.T) {
 		{
 			name:    "grouped visa test number passes luhn without a cue word",
 			payload: "Оплата картой 4111 1111 1111 1111 прошла.",
-			want:    []wantFin{{"4111 1111 1111 1111", pd.TypeCardNumber, finConfLuhn, "visa"}},
+			want:    []wantFin{{fintCard4111, pd.TypeCardNumber, finConfLuhn, "visa"}},
 		},
 		{
 			name:    "solid mastercard test number",
@@ -236,7 +238,7 @@ func TestFinanceCombinations(t *testing.T) {
 			name:    "card and its cvv",
 			payload: "Карта 4111 1111 1111 1111, CVV 123.",
 			want: []wantFin{
-				{"4111 1111 1111 1111", pd.TypeCardNumber, finConfLuhn, "visa"},
+				{fintCard4111, pd.TypeCardNumber, finConfLuhn, "visa"},
 				{"123", pd.TypeCVV, finConfSecret, "cvv"},
 			},
 		},
@@ -244,7 +246,7 @@ func TestFinanceCombinations(t *testing.T) {
 			name:    "card and inn in one sentence",
 			payload: "Карта 4111 1111 1111 1111, ИНН 770708389324.",
 			want: []wantFin{
-				{"4111 1111 1111 1111", pd.TypeCardNumber, finConfLuhn, "visa"},
+				{fintCard4111, pd.TypeCardNumber, finConfLuhn, "visa"},
 				{"770708389324", pd.TypeINN, finConfINNChecked, "personal"},
 			},
 		},
@@ -494,7 +496,7 @@ func TestFinanceMaskedCardIsLeftAlone(t *testing.T) {
 		})
 	}
 	checkFinance(t, "Карта 4276 **** **** 6789 заменена на 4111 1111 1111 1111.",
-		[]wantFin{{"4111 1111 1111 1111", pd.TypeCardNumber, finConfLuhn, "visa"}})
+		[]wantFin{{fintCard4111, pd.TypeCardNumber, finConfLuhn, "visa"}})
 }
 
 // TestFinanceExpiryIsNotMasked pins the other half of the card block. The spec
@@ -510,11 +512,11 @@ func TestFinanceExpiryIsNotMasked(t *testing.T) {
 		{"alone", "Срок действия 09/28.", nil},
 		{"english cue", "exp 09/28", nil},
 		{"before the card", "Срок действия 09/28, карта 4111 1111 1111 1111.",
-			[]wantFin{{"4111 1111 1111 1111", pd.TypeCardNumber, finConfLuhn, "visa"}}},
+			[]wantFin{{fintCard4111, pd.TypeCardNumber, finConfLuhn, "visa"}}},
 		{"after the card", "Карта 4111 1111 1111 1111 до 09/28.",
-			[]wantFin{{"4111 1111 1111 1111", pd.TypeCardNumber, finConfLuhn, "visa"}}},
+			[]wantFin{{fintCard4111, pd.TypeCardNumber, finConfLuhn, "visa"}}},
 		{"glued to the card", "Карта 4111 1111 1111 1111 09/28 CVC",
-			[]wantFin{{"4111 1111 1111 1111", pd.TypeCardNumber, finConfLuhn, "visa"}}},
+			[]wantFin{{fintCard4111, pd.TypeCardNumber, finConfLuhn, "visa"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) { checkFinance(t, tc.payload, tc.want) })

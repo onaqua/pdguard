@@ -8,6 +8,17 @@ import (
 	"pdguard/internal/pd/text"
 )
 
+const (
+	fiotIvanov             = "иванов"
+	fiotFullName           = "Иванов Иван Иванович"
+	fiotIvanovSurname      = "Иванов"
+	fiotSpacedFullName     = "Иванов   Иван   Иванович"
+	fiotNoFIOFmt           = "%q: expected no FIO spans, got %v"
+	fiotPushkin            = "пушкин"
+	fiotFamousNotPopulated = "famous-people dictionary is not populated yet"
+	fiotIVANIVANOV         = "IVAN IVANOV"
+)
+
 // fioSpansIn runs only the name detector, so a failure here can never be
 // blamed on a sibling detector's spans.
 func fioSpansIn(t *testing.T, in string) []pd.Span {
@@ -32,7 +43,7 @@ func fioOnly(spans []pd.Span, typ pd.Type) []pd.Span {
 // are covered separately and need no dictionary at all.
 func fioRequireNamesDict(t *testing.T) {
 	t.Helper()
-	if !dict.IsFirstName("иван") || !dict.IsSurname("иванов") {
+	if !dict.IsFirstName("иван") || !dict.IsSurname(fiotIvanov) {
 		t.Skip("name dictionaries are not populated yet")
 	}
 }
@@ -74,7 +85,7 @@ func TestFIOMorphologyPositive(t *testing.T) {
 	cases := []struct {
 		in, want, hint string
 	}{
-		{"Иванов Иван Иванович обратился в банк", "Иванов Иван Иванович", "full"},
+		{"Иванов Иван Иванович обратился в банк", fiotFullName, "full"},
 		{"Клиент Иван Иванович Иванов", "Иван Иванович Иванов", "full"},
 		{"Позвонил Иван Иванович", "Иван Иванович", "name_patronymic"},
 		{"Счёт открыт на имя Иванова Ивана Ивановича", "Иванова Ивана Ивановича", "full"},
@@ -89,7 +100,7 @@ func TestFIOMorphologyPositive(t *testing.T) {
 		// hyphenated-compound rule in fioIsSurname recovers this one.
 		{"Доверенность выдана Мамину-Сибиряку на получение вклада.", "Мамину-Сибиряку", "surname"},
 		{"Клиент Салтыкову-Щедрину открыл счёт", "Салтыкову-Щедрину", "surname"},
-		{"клиент Иванов позвонил", "Иванов", "surname"},
+		{"клиент Иванов позвонил", fiotIvanovSurname, "surname"},
 		{"Получатель Сидоров подтвердил перевод", "Сидоров", "surname"},
 	}
 	for _, c := range cases {
@@ -152,10 +163,10 @@ func TestFIOMorphPair(t *testing.T) {
 func TestFIOMorphPairNegative(t *testing.T) {
 	fioRequireNamesDict(t)
 	// A lower-case word after the surname is the sentence continuing.
-	fioAssertSpans(t, "Клиент Иванов подтвердил заявку", "Иванов")
+	fioAssertSpans(t, "Клиент Иванов подтвердил заявку", fiotIvanovSurname)
 	// Toponyms, countries and organisations stay outside the span.
 	fioAssertSpans(t, "Перевод от Иванова Москва получен", "Иванова")
-	fioAssertSpans(t, "Клиент Иванов Россия", "Иванов")
+	fioAssertSpans(t, "Клиент Иванов Россия", fiotIvanovSurname)
 	// An organisation marker next to the candidate still vetoes the whole
 	// region: "Иванов Холдинг" is a counterparty, not a client.
 	fioAssertSpans(t, "Клиент Иванов Холдинг")
@@ -203,10 +214,10 @@ func TestFIOAmbiguousInitial(t *testing.T) {
 func TestFIOSeparators(t *testing.T) {
 	fioRequireNamesDict(t)
 	fioAssertSpans(t, "Иванов\nИван\nИванович", "Иванов\nИван\nИванович")
-	fioAssertSpans(t, "Иванов   Иван   Иванович", "Иванов   Иван   Иванович")
+	fioAssertSpans(t, fiotSpacedFullName, fiotSpacedFullName)
 	fioAssertSpans(t, "Фамилия   Имя   Отчество\nИванов   Иван   Иванович",
-		"Иванов   Иван   Иванович")
-	fioAssertSpans(t, "Клиент      Иванов", "Иванов")
+		fiotSpacedFullName)
+	fioAssertSpans(t, "Клиент      Иванов", fiotIvanovSurname)
 	fioAssertSpans(t, "Иванов\nИ.И.", "Иванов\nИ.И.")
 	// A blank line is a wall: the surname of one record must not be spliced
 	// onto the given name of the next.
@@ -219,11 +230,11 @@ func TestFIOSeparators(t *testing.T) {
 // span-distance metric.
 func TestFIOBrackets(t *testing.T) {
 	fioRequireNamesDict(t)
-	fioAssertSpans(t, "Клиент «Иванов Иван Иванович» заключил договор", "Иванов Иван Иванович")
-	fioAssertSpans(t, "(Иванов Иван Иванович)", "Иванов Иван Иванович")
-	fioAssertSpans(t, "ФИО: Иванов Иван Иванович", "Иванов Иван Иванович")
+	fioAssertSpans(t, "Клиент «Иванов Иван Иванович» заключил договор", fiotFullName)
+	fioAssertSpans(t, "(Иванов Иван Иванович)", fiotFullName)
+	fioAssertSpans(t, "ФИО: Иванов Иван Иванович", fiotFullName)
 	fioAssertSpans(t, `Подписал "Иванов И.И." лично`, "Иванов И.И.")
-	fioAssertSpans(t, "Клиент [Иванов Иван Иванович] подтвердил", "Иванов Иван Иванович")
+	fioAssertSpans(t, "Клиент [Иванов Иван Иванович] подтвердил", fiotFullName)
 }
 
 // TestFIOCaseInsensitive pins the specification requirement that recognition
@@ -232,8 +243,8 @@ func TestFIOCaseInsensitive(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"ИВАНОВ ИВАН ИВАНОВИЧ", "ИВАНОВ ИВАН ИВАНОВИЧ"},
 		{"иванов иван иванович", "иванов иван иванович"},
-		{"Иванов Иван Иванович", "Иванов Иван Иванович"},
-		{"клиент иванов", "иванов"},
+		{fiotFullName, fiotFullName},
+		{"клиент иванов", fiotIvanov},
 		{"КЛИЕНТ ИВАНОВ", "ИВАНОВ"},
 	}
 	for _, c := range cases {
@@ -275,7 +286,7 @@ func TestFIONegative(t *testing.T) {
 	}
 	for _, in := range cases {
 		if spans := fioOnly(fioSpansIn(t, in), pd.TypeFIO); len(spans) != 0 {
-			t.Errorf("%q: expected no FIO spans, got %v", in, fioDump(in, spans))
+			t.Errorf(fiotNoFIOFmt, in, fioDump(in, spans))
 		}
 	}
 }
@@ -283,8 +294,8 @@ func TestFIONegative(t *testing.T) {
 // TestFIOFamousPersonVeto exercises the public-figure list directly; it can
 // only run once that list is filled in.
 func TestFIOFamousPersonVeto(t *testing.T) {
-	if !dict.IsFamousPerson("пушкин") {
-		t.Skip("famous-people dictionary is not populated yet")
+	if !dict.IsFamousPerson(fiotPushkin) {
+		t.Skip(fiotFamousNotPopulated)
 	}
 	cases := []string{
 		"Мы читали Александра Пушкина в оригинале",
@@ -293,7 +304,7 @@ func TestFIOFamousPersonVeto(t *testing.T) {
 	}
 	for _, in := range cases {
 		if spans := fioOnly(fioSpansIn(t, in), pd.TypeFIO); len(spans) != 0 {
-			t.Errorf("%q: expected no FIO spans, got %v", in, fioDump(in, spans))
+			t.Errorf(fiotNoFIOFmt, in, fioDump(in, spans))
 		}
 	}
 }
@@ -305,8 +316,8 @@ func TestFIOFamousPersonVeto(t *testing.T) {
 // right answer — otherwise every client who shares a surname with a celebrity
 // would leak.
 func TestFIOAnchorBeatsFamousList(t *testing.T) {
-	if !dict.IsFamousPerson("пушкин") {
-		t.Skip("famous-people dictionary is not populated yet")
+	if !dict.IsFamousPerson(fiotPushkin) {
+		t.Skip(fiotFamousNotPopulated)
 	}
 	fioAssertOneSpan(t, "Счёт оформлен на имя Пушкина", pd.TypeFIO, "Пушкина", "surname")
 }
@@ -326,14 +337,14 @@ func TestFIOStopWordComponent(t *testing.T) {
 	}
 	in := stop + " Иванович"
 	if spans := fioOnly(fioSpansIn(t, in), pd.TypeFIO); len(spans) != 0 {
-		t.Errorf("%q: expected no FIO spans, got %v", in, fioDump(in, spans))
+		t.Errorf(fiotNoFIOFmt, in, fioDump(in, spans))
 	}
 }
 
 // TestFIODisabledType makes sure the detector honours the per-type switch, so
 // a deployment can turn a category off without touching code.
 func TestFIODisabledType(t *testing.T) {
-	ctx := NewContext("Иванов Иван Иванович", func(pd.Type) bool { return false })
+	ctx := NewContext(fiotFullName, func(pd.Type) bool { return false })
 	if spans := (fioDetector{}).Detect(ctx); len(spans) != 0 {
 		t.Errorf("expected no spans when every type is disabled, got %d", len(spans))
 	}
@@ -352,7 +363,7 @@ func TestFIOSpanOffsets(t *testing.T) {
 	if s.Start < 0 || s.End > len(in) || s.Start >= s.End {
 		t.Fatalf("bad span %+v for input of %d bytes", s, len(in))
 	}
-	if got := in[s.Start:s.End]; got != "Иванов Иван Иванович" {
+	if got := in[s.Start:s.End]; got != fiotFullName {
 		t.Errorf("span text = %q", got)
 	}
 }
@@ -361,9 +372,9 @@ func TestFIOSpanOffsets(t *testing.T) {
 
 func TestCardHolderPositive(t *testing.T) {
 	cases := []struct{ in, want string }{
-		{"Держатель карты: IVAN IVANOV", "IVAN IVANOV"},
+		{"Держатель карты: IVAN IVANOV", fiotIVANIVANOV},
 		{"Имя на карте IVAN I IVANOV", "IVAN I IVANOV"},
-		{"IVAN IVANOV 4509 1234 5678 9012", "IVAN IVANOV"},
+		{"IVAN IVANOV 4509 1234 5678 9012", fiotIVANIVANOV},
 		{"cardholder PETR PETROV", "PETR PETROV"},
 	}
 	for _, c := range cases {
@@ -374,7 +385,7 @@ func TestCardHolderPositive(t *testing.T) {
 func TestCardHolderNegative(t *testing.T) {
 	cases := []string{
 		// No card context at all.
-		"IVAN IVANOV",
+		fiotIVANIVANOV,
 		"PLEASE CHECK THIS",
 		// Company and brand capitals next to a card must stay untouched.
 		"Карта ALFA BANK LTD",
@@ -460,7 +471,7 @@ func TestFIOStrongClientAnchorLeft(t *testing.T) {
 		// Adjacency: an anchor further left does not count.
 		{"Клиент упомянул Иванова", false},
 		{"Клиент подписал документы Иванова", false},
-		{"Иванов", false},
+		{fiotIvanovSurname, false},
 	}
 	for _, c := range cases {
 		ctx := NewContext(c.in, nil)
@@ -484,8 +495,8 @@ func TestFIOStrongClientAnchorLeft(t *testing.T) {
 // data is personal data like anyone else's; a role word written directly in
 // front of the name is what proves the reading.
 func TestFIOStrongAnchorBeatsFamousVeto(t *testing.T) {
-	if !dict.IsFamousPerson("пушкин") {
-		t.Skip("famous-people dictionary is not populated yet")
+	if !dict.IsFamousPerson(fiotPushkin) {
+		t.Skip(fiotFamousNotPopulated)
 	}
 	cases := []struct{ in, want string }{
 		// The hyphenated double surname the review corpus reported missing.
@@ -517,8 +528,8 @@ func TestFIOStrongAnchorBeatsFamousVeto(t *testing.T) {
 // figure must survive byte for byte, because the quality metric is a span
 // distance against a reference mask and every masked byte here is a pure loss.
 func TestFIOFamousVetoHoldsWithoutStrongAnchor(t *testing.T) {
-	if !dict.IsFamousPerson("пушкин") {
-		t.Skip("famous-people dictionary is not populated yet")
+	if !dict.IsFamousPerson(fiotPushkin) {
+		t.Skip(fiotFamousNotPopulated)
 	}
 	cases := []string{
 		"В школьную программу входит стихотворение Александра Пушкина.",
@@ -535,7 +546,7 @@ func TestFIOFamousVetoHoldsWithoutStrongAnchor(t *testing.T) {
 	}
 	for _, in := range cases {
 		if spans := fioOnly(fioSpansIn(t, in), pd.TypeFIO); len(spans) != 0 {
-			t.Errorf("%q: expected no FIO spans, got %v", in, fioDump(in, spans))
+			t.Errorf(fiotNoFIOFmt, in, fioDump(in, spans))
 		}
 	}
 }
@@ -546,7 +557,7 @@ func TestFIOFamousVetoHoldsWithoutStrongAnchor(t *testing.T) {
 // to reject the name outright.
 func TestFIOLowerSurnameAfterStrongAnchor(t *testing.T) {
 	fioRequireNamesDict(t)
-	fioAssertOneSpan(t, "Клиент иванов пришел в офис", pd.TypeFIO, "иванов", "surname")
+	fioAssertOneSpan(t, "Клиент иванов пришел в офис", pd.TypeFIO, fiotIvanov, "surname")
 	fioAssertOneSpan(t, "Заемщик петров подтвердил перевод", pd.TypeFIO, "петров", "surname")
 	fioAssertOneSpan(t, "Счет оформлен на иванова", pd.TypeFIO, "иванова", "surname")
 }
@@ -570,7 +581,7 @@ func TestFIOLowerSurnameNeedsStrongAnchor(t *testing.T) {
 	}
 	for _, in := range cases {
 		if spans := fioOnly(fioSpansIn(t, in), pd.TypeFIO); len(spans) != 0 {
-			t.Errorf("%q: expected no FIO spans, got %v", in, fioDump(in, spans))
+			t.Errorf(fiotNoFIOFmt, in, fioDump(in, spans))
 		}
 	}
 }

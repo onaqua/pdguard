@@ -7,6 +7,13 @@ import (
 	"pdguard/internal/pd"
 )
 
+const (
+	ppt4509123456   = "4509 123456"
+	pptSeriesNumber = "серия 4509 номер 123456"
+	ppt770001       = "770-001"
+	pptTula         = "г. Тула"
+)
+
 // passportSpans runs ONLY the passport detector, deliberately bypassing Run:
 // sibling detectors live in other files of this package and their findings
 // would make these assertions depend on unrelated code. Spans come back in
@@ -51,18 +58,18 @@ func TestPassportSeriesAndNumber(t *testing.T) {
 		in   string
 		want []string
 	}{
-		{"joined with space", "паспорт 4509 123456", []string{"4509 123456"}},
+		{"joined with space", "паспорт 4509 123456", []string{ppt4509123456}},
 		{"contiguous", "паспорт 4509123456", []string{"4509123456"}},
 		{"series written as two pairs", "паспорт: 45 09 123456", []string{"45 09 123456"}},
 		{"numero sign between groups", "паспорт 45 09 № 123456", []string{"45 09 № 123456"}},
-		{"labelled series and number", "серия 4509 номер 123456", []string{"4509", "123456"}},
+		{"labelled series and number", pptSeriesNumber, []string{"4509", "123456"}},
 		{"labelled pairs and number", "серия 45 09 номер 123456", []string{"45 09", "123456"}},
 		{"passport rf with numero", "паспорт РФ 4509 № 123456", []string{"4509 № 123456"}},
 		{"hyphen separator", "паспорт 4509-123456", []string{"4509-123456"}},
 		{"abbreviated labels", "с. 4509 н. 123456", []string{"4509", "123456"}},
-		{"uppercase anchor", "ПАСПОРТ 4509 123456", []string{"4509 123456"}},
-		{"identity document phrase", "документ, удостоверяющий личность: 4509 123456", []string{"4509 123456"}},
-		{"inside a sentence", "Клиент предъявил паспорт 4509 123456 и ушёл", []string{"4509 123456"}},
+		{"uppercase anchor", "ПАСПОРТ 4509 123456", []string{ppt4509123456}},
+		{"identity document phrase", "документ, удостоверяющий личность: 4509 123456", []string{ppt4509123456}},
+		{"inside a sentence", "Клиент предъявил паспорт 4509 123456 и ушёл", []string{ppt4509123456}},
 
 		// Field order. A form may print either half first, and the two vouch
 		// for each other in both directions.
@@ -83,11 +90,11 @@ func TestPassportSeriesAndNumber(t *testing.T) {
 		{"number split into triples", "паспорт 4509 123 456", []string{"4509 123 456"}},
 
 		// Case forms and abbreviations of the anchor word.
-		{"genitive anchor", "Реквизиты паспорта 4509 123456", []string{"4509 123456"}},
-		{"instrumental anchor", "удостоверяется паспортом 4509 123456", []string{"4509 123456"}},
-		{"abbreviated anchor", "пасп. 4509 123456", []string{"4509 123456"}},
-		{"bare abbreviated anchor", "пасп 4509 123456", []string{"4509 123456"}},
-		{"slash abbreviation", "п/п 4509 123456", []string{"4509 123456"}},
+		{"genitive anchor", "Реквизиты паспорта 4509 123456", []string{ppt4509123456}},
+		{"instrumental anchor", "удостоверяется паспортом 4509 123456", []string{ppt4509123456}},
+		{"abbreviated anchor", "пасп. 4509 123456", []string{ppt4509123456}},
+		{"bare abbreviated anchor", "пасп 4509 123456", []string{ppt4509123456}},
+		{"slash abbreviation", "п/п 4509 123456", []string{ppt4509123456}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -103,7 +110,7 @@ func TestPassportSeriesAndNumber(t *testing.T) {
 // "серия" and "номер" are not personal data, so a word between the two digit
 // groups must produce two spans instead of one span swallowing that word.
 func TestPassportLabelsStayOutsideSpan(t *testing.T) {
-	const in = "серия 4509 номер 123456"
+	const in = pptSeriesNumber
 	spans := passportSpans(t, in)
 	if len(spans) != 2 {
 		t.Fatalf("want 2 spans, got %d: %+v", len(spans), spans)
@@ -137,11 +144,11 @@ func TestPassportSubdivisionCode(t *testing.T) {
 		in   string
 		want []string
 	}{
-		{"dashed", "код подразделения 770-001", []string{"770-001"}},
+		{"dashed", "код подразделения 770-001", []string{ppt770001}},
 		{"six digits", "код подразделения 770001", []string{"770001"}},
-		{"slash abbreviation", "к/п 770-001", []string{"770-001"}},
-		{"short abbreviation", "кп 770-001", []string{"770-001"}},
-		{"bare word", "подразделение 770-001", []string{"770-001"}},
+		{"slash abbreviation", "к/п 770-001", []string{ppt770001}},
+		{"short abbreviation", "кп 770-001", []string{ppt770001}},
+		{"bare word", "подразделение 770-001", []string{ppt770001}},
 		{"space instead of a hyphen", "код подразделения 770 001", []string{"770 001"}},
 		{"abbreviated label", "код подр. 770001", []string{"770001"}},
 	}
@@ -267,7 +274,7 @@ func TestPassportBirthPlace(t *testing.T) {
 		{"village with region", "родился в с. Ивановка Тульской области", []string{"с. Ивановка Тульской области"}},
 		{"hamlet", "место рождения дер. Малые Вязёмы", []string{"дер. Малые Вязёмы"}},
 		{"female form", "уроженка г. Твери", []string{"г. Твери"}},
-		{"stops at comma", "место рождения г. Тула, паспорт 4509 123456", []string{"г. Тула"}},
+		{"stops at comma", "место рождения г. Тула, паспорт 4509 123456", []string{pptTula}},
 		{
 			"city followed by its region",
 			"место рождения: г. Тула Тульской области",
@@ -283,7 +290,7 @@ func TestPassportBirthPlace(t *testing.T) {
 		{
 			"comma before the next field still stops the span",
 			"место рождения г. Тула, гражданство РФ",
-			[]string{"г. Тула"},
+			[]string{pptTula},
 		},
 	}
 	for _, tc := range cases {
@@ -329,11 +336,11 @@ func TestPassportCombined(t *testing.T) {
 		"код подразделения 710-002, место рождения: г. Тула"
 
 	want := map[pd.Type][]string{
-		pd.TypePassport:        {"4509 123456"},
+		pd.TypePassport:        {ppt4509123456},
 		pd.TypeCitizenship:     {"РФ"},
 		pd.TypePassportIssuer:  {"ОВД города Тулы"},
 		pd.TypeSubdivisionCode: {"710-002"},
-		pd.TypeBirthPlace:      {"г. Тула"},
+		pd.TypeBirthPlace:      {pptTula},
 	}
 	for typ, exp := range want {
 		if got := passportTexts(t, in, typ); !passportEqual(got, exp) {
@@ -469,15 +476,15 @@ func TestPassportKeepsItsOwnFormsNextToOtherDocuments(t *testing.T) {
 		in   string
 		want []string
 	}{
-		{"joined", "паспорт 4509 123456", []string{"4509 123456"}},
+		{"joined", "паспорт 4509 123456", []string{ppt4509123456}},
 		{"contiguous", "паспорт 4509123456", []string{"4509123456"}},
 		{"separating words", "паспорт серия 4509 номер 123456", []string{"4509", "123456"}},
-		{"separating words no anchor", "серия 4509 номер 123456", []string{"4509", "123456"}},
+		{"separating words no anchor", pptSeriesNumber, []string{"4509", "123456"}},
 		{"pairs", "паспорт: 45 09 123456", []string{"45 09 123456"}},
-		{"after snils", "СНИЛС 112-233-445 95, паспорт 4509 123456.", []string{"4509 123456"}},
-		{"after driver licence", "Водительское удостоверение 9902 123456, паспорт 4509 123456.", []string{"4509 123456"}},
+		{"after snils", "СНИЛС 112-233-445 95, паспорт 4509 123456.", []string{ppt4509123456}},
+		{"after driver licence", "Водительское удостоверение 9902 123456, паспорт 4509 123456.", []string{ppt4509123456}},
 		{"after oms", "Полис ОМС оформлен, паспорт серия 4509 номер 123456.", []string{"4509", "123456"}},
-		{"licence mention in a previous sentence", "Водительские права утеряны. Паспорт 4509 123456 предъявлен.", []string{"4509 123456"}},
+		{"licence mention in a previous sentence", "Водительские права утеряны. Паспорт 4509 123456 предъявлен.", []string{ppt4509123456}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -6,6 +6,10 @@ import (
 	"time"
 )
 
+// benchEndpoint is the canonical process endpoint used throughout the
+// normalisation tests.
+const benchEndpoint = "http://localhost:8080/process"
+
 // TestNormalizeEndpoint pins the -url normalisation rules. The case that
 // motivated them is "origin only": a run against http://localhost:8080 used to
 // 404 five times in a row and abort under the Appendix B streak rule, which
@@ -20,24 +24,24 @@ func TestNormalizeEndpoint(t *testing.T) {
 		{
 			name:     "origin without path",
 			in:       "http://localhost:8080",
-			want:     "http://localhost:8080/process",
+			want:     benchEndpoint,
 			wantNote: true,
 		},
 		{
 			name:     "origin with trailing slash",
 			in:       "http://localhost:8080/",
-			want:     "http://localhost:8080/process",
+			want:     benchEndpoint,
 			wantNote: true,
 		},
 		{
 			name: "already the endpoint",
-			in:   "http://localhost:8080/process",
-			want: "http://localhost:8080/process",
+			in:   benchEndpoint,
+			want: benchEndpoint,
 		},
 		{
 			name:     "endpoint with trailing slash",
 			in:       "http://localhost:8080/process/",
-			want:     "http://localhost:8080/process",
+			want:     benchEndpoint,
 			wantNote: true,
 		},
 		{
@@ -102,7 +106,7 @@ func TestValidateNormalizesURL(t *testing.T) {
 	if err := o.validate(); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
-	if o.url != "http://localhost:8080/process" {
+	if o.url != benchEndpoint {
 		t.Errorf("validate left url = %q", o.url)
 	}
 	if !strings.Contains(o.urlNote, "/process") {

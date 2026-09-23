@@ -18,6 +18,8 @@ import (
 	"pdguard/internal/store"
 )
 
+const mmConfigLoadFmt = "config.Load: %v"
+
 // newEngineDefaultStore builds an engine on a store with the SHIPPED limits,
 // which is the point of the oversize test: the bug was a default that could
 // not hold what the server accepts.
@@ -25,7 +27,7 @@ func newEngineDefaultStore(t *testing.T) (*Engine, store.Store) {
 	t.Helper()
 	mgr, err := config.Load("")
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf(mmConfigLoadFmt, err)
 	}
 	st := store.New(store.Config{SweepInterval: -1})
 	t.Cleanup(st.Close)
@@ -83,7 +85,7 @@ func TestDemaskOversizedPayload(t *testing.T) {
 func TestStoreRemembersEverythingTheServerAccepts(t *testing.T) {
 	mgr, err := config.Load("")
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf(mmConfigLoadFmt, err)
 	}
 	c := mgr.Get()
 	// A JSON body escaping Cyrillic as \uXXXX is about three times the size of
@@ -139,7 +141,7 @@ func TestDemaskMissEchoesOversizedMask(t *testing.T) {
 	// configuration used to do to a 2.5 MiB text.
 	mgr, err := config.Load("")
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf(mmConfigLoadFmt, err)
 	}
 	st := store.New(store.Config{MaxValueBytes: 1 << 10, SweepInterval: -1})
 	t.Cleanup(st.Close)

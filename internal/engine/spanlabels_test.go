@@ -8,6 +8,8 @@ import (
 	"pdguard/internal/pd"
 )
 
+const slNumLabel = "номер 123456"
+
 // ---------------------------------------------------------------------------
 // expandLabelSpans, unit level
 //
@@ -42,7 +44,7 @@ func TestExpandLabelSpansSwallowsTheLabel(t *testing.T) {
 		// The case from the task: the series number is introduced by "серия",
 		// itself introduced by "паспорт" — two words, which is the limit.
 		{"серия 4509", "Паспорт серия 4509 выдан МВД", "4509", pd.TypePassport, "Паспорт серия 4509"},
-		{"номер", "номер 123456 подтверждён", "123456", pd.TypePassport, "номер 123456"},
+		{"номер", "номер 123456 подтверждён", "123456", pd.TypePassport, slNumLabel},
 		{"colon separator", "Телефон: +7 916 123-45-67", "+7 916 123-45-67", pd.TypePhone, "Телефон: +7 916 123-45-67"},
 		{"abbreviated street", "Живёт на ул. Вавилова", "Вавилова", pd.TypeStreet, "ул. Вавилова"},
 		{"no separator at all", "Квитанция №123456 оплачена", "123456", pd.TypePassport, "№123456"},
@@ -104,8 +106,8 @@ func TestExpandLabelSpansNeverOverlaps(t *testing.T) {
 		span(t, src, "123456", pd.TypePassport),
 	}
 	got := expandLabelSpans(src, spans)
-	if c := covered(src, got[1]); c != "номер 123456" {
-		t.Fatalf("second span covers %q, want %q", c, "номер 123456")
+	if c := covered(src, got[1]); c != slNumLabel {
+		t.Fatalf("second span covers %q, want %q", c, slNumLabel)
 	}
 	if got[1].Start < got[0].End {
 		t.Fatalf("spans overlap: %d < %d", got[1].Start, got[0].End)

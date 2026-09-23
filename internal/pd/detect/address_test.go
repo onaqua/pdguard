@@ -6,6 +6,15 @@ import (
 	"pdguard/internal/pd"
 )
 
+const (
+	addrtMoscow     = "Москва"
+	addrtLenina     = "Ленина"
+	addrtKazan      = "Казань"
+	addrtBaumana    = "Баумана"
+	addrtTverskaya  = "Тверская"
+	addrtNoSpansFmt = "payload %q: expected no spans, got:\n%s"
+)
+
 // wantAddr is one expected span: the category plus the EXACT substring the
 // detector must cover. Comparing the substring rather than raw offsets is what
 // proves the marker stayed outside the span — "ул." and "д." must survive the
@@ -63,8 +72,8 @@ func TestAddressComponents(t *testing.T) {
 			name:    "full address behind an anchor",
 			payload: "Клиент проживает по адресу: г. Москва, ул. Ленина, д. 5, кв. 12",
 			want: []wantAddr{
-				{pd.TypeCity, "Москва"},
-				{pd.TypeStreet, "Ленина"},
+				{pd.TypeCity, addrtMoscow},
+				{pd.TypeStreet, addrtLenina},
 				{pd.TypeHouse, "5"},
 				{pd.TypeApartment, "12"},
 			},
@@ -101,8 +110,8 @@ func TestAddressComponents(t *testing.T) {
 			payload: "Адрес: Россия, г. Казань, ул. Баумана, д. 3",
 			want: []wantAddr{
 				{pd.TypeCountry, "Россия"},
-				{pd.TypeCity, "Казань"},
-				{pd.TypeStreet, "Баумана"},
+				{pd.TypeCity, addrtKazan},
+				{pd.TypeStreet, addrtBaumana},
 				{pd.TypeHouse, "3"},
 			},
 		},
@@ -194,7 +203,7 @@ func TestAddressNegative(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := runAddr(t, c.payload); len(got) != 0 {
-				t.Errorf("payload %q: expected no spans, got:\n%s", c.payload, dumpAddr(c.payload, got))
+				t.Errorf(addrtNoSpansFmt, c.payload, dumpAddr(c.payload, got))
 			}
 		})
 	}
@@ -227,7 +236,7 @@ func TestAddressFallbackSkipsNonAddresses(t *testing.T) {
 	}
 	for _, payload := range cases {
 		if got := runAddr(t, payload); len(got) != 0 {
-			t.Errorf("payload %q: expected no spans, got:\n%s", payload, dumpAddr(payload, got))
+			t.Errorf(addrtNoSpansFmt, payload, dumpAddr(payload, got))
 		}
 	}
 }
@@ -255,7 +264,7 @@ func TestAddressRespectsEnabled(t *testing.T) {
 	payload := "Клиент проживает по адресу: г. Москва, ул. Ленина, д. 5, кв. 12"
 	ctx := NewContext(payload, func(t pd.Type) bool { return t == pd.TypeStreet })
 	got := addressDetector{}.Detect(ctx)
-	if len(got) != 1 || got[0].Type != pd.TypeStreet || payload[got[0].Start:got[0].End] != "Ленина" {
+	if len(got) != 1 || got[0].Type != pd.TypeStreet || payload[got[0].Start:got[0].End] != addrtLenina {
 		t.Fatalf("expected only the STREET span, got:\n%s", dumpAddr(payload, got))
 	}
 }
@@ -382,16 +391,16 @@ func TestAddressObliqueCase(t *testing.T) {
 // components simply follow the settlement across commas.
 func TestAddressMarkerless(t *testing.T) {
 	checkAddr(t, "Проживает по адресу: Москва, Тверская 12, кв 5", []wantAddr{
-		{pd.TypeCity, "Москва"},
-		{pd.TypeStreet, "Тверская"},
+		{pd.TypeCity, addrtMoscow},
+		{pd.TypeStreet, addrtTverskaya},
 		{pd.TypeHouse, "12"},
 		{pd.TypeApartment, "5"},
 	})
 	// The same line without any anchor: the three components vouch for each
 	// other, which is the only evidence the gate accepts here.
 	checkAddr(t, "Москва, Тверская 12, кв 5", []wantAddr{
-		{pd.TypeCity, "Москва"},
-		{pd.TypeStreet, "Тверская"},
+		{pd.TypeCity, addrtMoscow},
+		{pd.TypeStreet, addrtTverskaya},
 		{pd.TypeHouse, "12"},
 		{pd.TypeApartment, "5"},
 	})
@@ -401,12 +410,12 @@ func TestAddressMarkerless(t *testing.T) {
 // from a chat box parses in full.
 func TestAddressDotlessAbbreviations(t *testing.T) {
 	checkAddr(t, "Адрес: ул Ленина д 5 кв 12", []wantAddr{
-		{pd.TypeStreet, "Ленина"},
+		{pd.TypeStreet, addrtLenina},
 		{pd.TypeHouse, "5"},
 		{pd.TypeApartment, "12"},
 	})
 	checkAddr(t, "Адрес: ул Ленина, д 5 корп 2, кв 12", []wantAddr{
-		{pd.TypeStreet, "Ленина"},
+		{pd.TypeStreet, addrtLenina},
 		{pd.TypeHouse, "5"},
 		{pd.TypeHouse, "2"},
 		{pd.TypeApartment, "12"},
@@ -421,7 +430,7 @@ func TestAddressHouseForms(t *testing.T) {
 	}{
 		{"Адрес: ул. Мира, д. 5/2", []wantAddr{{pd.TypeStreet, "Мира"}, {pd.TypeHouse, "5/2"}}},
 		{"Адрес: ул. Мира, д. 12А", []wantAddr{{pd.TypeStreet, "Мира"}, {pd.TypeHouse, "12А"}}},
-		{"Адрес: ул. Тверская, владение 3с1", []wantAddr{{pd.TypeStreet, "Тверская"}, {pd.TypeHouse, "3с1"}}},
+		{"Адрес: ул. Тверская, владение 3с1", []wantAddr{{pd.TypeStreet, addrtTverskaya}, {pd.TypeHouse, "3с1"}}},
 		{"Адрес: ул. Мира, д. 5 литера Б", []wantAddr{
 			{pd.TypeStreet, "Мира"}, {pd.TypeHouse, "5"}, {pd.TypeHouse, "Б"},
 		}},
@@ -435,10 +444,10 @@ func TestAddressHouseForms(t *testing.T) {
 func TestAddressReverseOrder(t *testing.T) {
 	checkAddr(t, "Адрес доставки: дом 5 по улице Ленина", []wantAddr{
 		{pd.TypeHouse, "5"},
-		{pd.TypeStreet, "Ленина"},
+		{pd.TypeStreet, addrtLenina},
 	})
 	checkAddr(t, "Адрес: ул. Ленина д. 5", []wantAddr{
-		{pd.TypeStreet, "Ленина"},
+		{pd.TypeStreet, addrtLenina},
 		{pd.TypeHouse, "5"},
 	})
 }
@@ -447,7 +456,7 @@ func TestAddressReverseOrder(t *testing.T) {
 // instead of opening it.
 func TestAddressTrailingPostalCode(t *testing.T) {
 	checkAddr(t, "Адрес: г. Москва, ул. Вавилова, д. 5, 119991", []wantAddr{
-		{pd.TypeCity, "Москва"},
+		{pd.TypeCity, addrtMoscow},
 		{pd.TypeStreet, "Вавилова"},
 		{pd.TypeHouse, "5"},
 		{pd.TypePostalCode, "119991"},
@@ -466,8 +475,8 @@ func TestAddressRegion(t *testing.T) {
 			{pd.TypeStreet, "Мира"}, {pd.TypeHouse, "5"},
 		}},
 		{"Адрес: Республика Татарстан, г. Казань, ул. Баумана, д. 3", []wantAddr{
-			{pd.TypeCity, "Татарстан"}, {pd.TypeCity, "Казань"},
-			{pd.TypeStreet, "Баумана"}, {pd.TypeHouse, "3"},
+			{pd.TypeCity, "Татарстан"}, {pd.TypeCity, addrtKazan},
+			{pd.TypeStreet, addrtBaumana}, {pd.TypeHouse, "3"},
 		}},
 		{"Адрес регистрации: Краснодарский край, г. Сочи, ул. Мира, д. 2", []wantAddr{
 			{pd.TypeCity, "Краснодарский"}, {pd.TypeCity, "Сочи"},
@@ -512,7 +521,7 @@ func TestAddressNegativeObliqueCase(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := runAddr(t, c.payload); len(got) != 0 {
-				t.Errorf("payload %q: expected no spans, got:\n%s", c.payload, dumpAddr(c.payload, got))
+				t.Errorf(addrtNoSpansFmt, c.payload, dumpAddr(c.payload, got))
 			}
 		})
 	}
@@ -555,7 +564,7 @@ func TestAddressOrgSubjectSuppressed(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := runAddr(t, c.payload); len(got) != 0 {
-				t.Errorf("payload %q: expected no spans, got:\n%s", c.payload, dumpAddr(c.payload, got))
+				t.Errorf(addrtNoSpansFmt, c.payload, dumpAddr(c.payload, got))
 			}
 		})
 	}
@@ -589,7 +598,7 @@ func TestAddressOrgSubjectStillMasks(t *testing.T) {
 			name:    "office belonging to a client",
 			payload: "Офис клиента находится на улице Ленина, дом 5.",
 			want: []wantAddr{
-				{pd.TypeStreet, "Ленина"},
+				{pd.TypeStreet, addrtLenina},
 				{pd.TypeHouse, "5"},
 			},
 		},
@@ -597,7 +606,7 @@ func TestAddressOrgSubjectStillMasks(t *testing.T) {
 			name:    "oblique office is never the subject",
 			payload: "Доставить в офис клиента: ул. Ленина, д. 4.",
 			want: []wantAddr{
-				{pd.TypeStreet, "Ленина"},
+				{pd.TypeStreet, addrtLenina},
 				{pd.TypeHouse, "4"},
 			},
 		},
@@ -607,7 +616,7 @@ func TestAddressOrgSubjectStillMasks(t *testing.T) {
 			name:    "delivery anchor beats the organisation subject",
 			payload: "Магазин отправит заказ по адресу доставки: ул. Ленина, д. 7, кв. 9.",
 			want: []wantAddr{
-				{pd.TypeStreet, "Ленина"},
+				{pd.TypeStreet, addrtLenina},
 				{pd.TypeHouse, "7"},
 				{pd.TypeApartment, "9"},
 			},
@@ -618,8 +627,8 @@ func TestAddressOrgSubjectStillMasks(t *testing.T) {
 			name:    "actual address with no owner word",
 			payload: "Фактический адрес: г. Казань, ул. Баумана, д. 3.",
 			want: []wantAddr{
-				{pd.TypeCity, "Казань"},
-				{pd.TypeStreet, "Баумана"},
+				{pd.TypeCity, addrtKazan},
+				{pd.TypeStreet, addrtBaumana},
 				{pd.TypeHouse, "3"},
 			},
 		},
@@ -627,7 +636,7 @@ func TestAddressOrgSubjectStillMasks(t *testing.T) {
 			name:    "a bare пункт is a contract clause",
 			payload: "Пункт 5 договора: доставка на улицу Ленина, дом 3.",
 			want: []wantAddr{
-				{pd.TypeStreet, "Ленина"},
+				{pd.TypeStreet, addrtLenina},
 				{pd.TypeHouse, "3"},
 			},
 		},
