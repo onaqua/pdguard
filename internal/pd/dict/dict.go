@@ -209,13 +209,22 @@ func sortedKey(words []string) string {
 
 // ---- lookups. All take an ALREADY-LOWERCASED word. ----
 
-func IsFirstName(w string) bool   { load(); _, ok := firstNames[w]; return ok }
-func IsSurname(w string) bool     { load(); _, ok := surnames[w]; return ok }
-func IsLatinName(w string) bool   { load(); _, ok := latinNames[w]; return ok }
-func IsCity(w string) bool        { load(); _, ok := cities[w]; return ok }
-func IsStreetType(w string) bool  { load(); _, ok := streetTypes[w]; return ok }
-func IsCountry(w string) bool     { load(); _, ok := countries[w]; return ok }
-func IsCitizenship(w string) bool { load(); _, ok := citizenships[w]; return ok }
+func IsFirstName(w string) bool { load(); _, ok := firstNames[w]; return ok }
+func IsSurname(w string) bool   { load(); _, ok := surnames[w]; return ok }
+func IsLatinName(w string) bool { load(); _, ok := latinNames[w]; return ok }
+func IsCity(w string) bool      { load(); _, ok := cities[w]; return ok }
+
+// IsCityPhrase reports whether the whole space-joined phrase is a city in the
+// nominative, covering the multi-word long forms ("нижний новгород").
+func IsCityPhrase(phrase string) bool { load(); _, ok := cities[phrase]; return ok }
+
+// IsCityFormPhrase reports whether the whole space-joined phrase is a city in
+// the nominative or any common oblique case, covering the inflected multi-word
+// forms ("нижнего новгорода", "нижнем новгороде").
+func IsCityFormPhrase(phrase string) bool { load(); _, ok := cityForms[phrase]; return ok }
+func IsStreetType(w string) bool          { load(); _, ok := streetTypes[w]; return ok }
+func IsCountry(w string) bool             { load(); _, ok := countries[w]; return ok }
+func IsCitizenship(w string) bool         { load(); _, ok := citizenships[w]; return ok }
 
 // IsCountryPhrase reports whether the whole space-joined phrase is a country
 // name from the dictionary, covering the multi-word long forms ("соединенные

@@ -43,6 +43,17 @@ const (
 // fragment would match something.
 const nameMinStemRunes = 3
 
+// fluentVowelStems maps given names with a fluent vowel onto their oblique
+// stem. The regular case-ending expansion would produce "лева"/"павела",
+// which are not the real oblique forms: "лев" drops the "е" in "льва",
+// "льву", "львом", "льве", and "павел" drops it in "павла", "павлу",
+// "павлом", "павле". The stem is declined with the same endings as the
+// nominative, so the oblique forms come out right.
+var fluentVowelStems = map[string]string{
+	"лев":   "льв",
+	"павел": "павл",
+}
+
 var (
 	nameCaseEndings = []string{
 		"ами", "ой", "ом", "ем", "ым", "ей", "ах", "ам", "ья",
@@ -124,6 +135,11 @@ func addNameForms(m map[string]NameForm, src set, bit NameForm, endings, restore
 			}
 		}
 		addRestoredForms(m, w, bit, endings, restores)
+		if stem, ok := fluentVowelStems[w]; ok {
+			for _, e := range endings {
+				m[stem+e] |= bit
+			}
+		}
 	}
 }
 

@@ -286,6 +286,7 @@ var addrAnchors = []string{
 	"адрес", addrPhraseProzhivaet, addrPhraseProzhivayush, addrPhrasePropisan, "зарегистрирован",
 	"регистраци", addrPhraseMesto, addrPhraseMesta, addrPhraseMestu,
 	"доставка", "доставки", "доставить по", "куда", "address", "индекс",
+	"уроженец", "уроженка", "уроженцем", "уроженкой",
 }
 
 // The bare word "адрес" is deliberately absent. "Отделение банка расположено по
@@ -453,7 +454,7 @@ func (d addressDetector) anyEnabled(ctx *Context) bool {
 	return false
 }
 
-func addrCaseBlind(ctx *Context) bool { return ctx.Text == ctx.Lower }
+func addrCaseBlind(ctx *Context) bool { return ctx.CaseBlind }
 
 // addrScanState carries the running house and street ends that the scan loop
 // threads through its per-token helpers.
@@ -504,7 +505,11 @@ func addrScanNumber(ctx *Context, i int, st *addrScanState) ([]addrCandidate, in
 	}
 	if c, ok := addrBareHouse(ctx, i, st.lastStreetEnd); ok {
 		st.lastHouseEnd = c.span.End
-		return []addrCandidate{c}, i, true
+		cands := []addrCandidate{c}
+		if a, ok := addrBareApartment(ctx, i, c.span.End); ok {
+			cands = append(cands, a)
+		}
+		return cands, i, true
 	}
 	return nil, i, false
 }
@@ -519,16 +524,16 @@ func addrScanWord(ctx *Context, i int, caseBlind bool, st *addrScanState) ([]add
 	if c, next, ok := addrCountryCandidate(ctx, i); ok {
 		return []addrCandidate{c}, next - 1, true
 	}
-	c, ok := addrBareCity(ctx, i, caseBlind)
+	c, next, ok := addrBareCity(ctx, i, caseBlind)
 	if !ok {
 		return nil, i, false
 	}
 	cands := []addrCandidate{c}
-	ni := i
-	if st2, hs, next, ok := addrCommaChain(ctx, i+1, caseBlind); ok {
+	ni := next - 1
+	if st2, hs, n2, ok := addrCommaChain(ctx, next, caseBlind); ok {
 		cands = append(cands, st2, hs)
 		st.lastStreetEnd, st.lastHouseEnd = st2.span.End, hs.span.End
-		ni = next - 1
+		ni = n2 - 1
 	}
 	return cands, ni, true
 }

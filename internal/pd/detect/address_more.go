@@ -248,14 +248,20 @@ func addrRegionPair(o, c addrCandidate) bool {
 		(o.span.Hint == addrHintRegion) != (c.span.Hint == addrHintRegion)
 }
 
-func addrBareCity(ctx *Context, i int, caseBlind bool) (addrCandidate, bool) {
+func addrBareCity(ctx *Context, i int, caseBlind bool) (addrCandidate, int, bool) {
 	t := ctx.Tokens[i]
 	if !caseBlind && !addrStartsUpper(ctx.Text[t.Start:t.End]) {
-		return addrCandidate{}, false
+		return addrCandidate{}, i, false
+	}
+	if c, next, ok := addrMultiWordCity(ctx, i, caseBlind); ok {
+		return c, next, true
+	}
+	if c, next, ok := addrHyphenCity(ctx, i, caseBlind); ok {
+		return c, next, true
 	}
 	w := ctx.Lower[t.Start:t.End]
 	if !dict.IsCityForm(w) {
-		return addrCandidate{}, false
+		return addrCandidate{}, i, false
 	}
 	start := t.Start
 	switch {
@@ -264,7 +270,7 @@ func addrBareCity(ctx *Context, i int, caseBlind bool) (addrCandidate, bool) {
 	default:
 		h := addrHyphenHead(ctx, i)
 		if h < 0 {
-			return addrCandidate{}, false
+			return addrCandidate{}, i, false
 		}
 		start = ctx.Tokens[h].Start
 	}
@@ -273,7 +279,111 @@ func addrBareCity(ctx *Context, i int, caseBlind bool) (addrCandidate, bool) {
 		needsNeighbour: true,
 		residenceOK:    true,
 		name:           w,
-	}, true
+	}, i + 1, true
+}
+
+// addrMultiWordCity matches a space-separated multi-word city ("Нижний
+// Новгород") starting at token i. The phrase must be a known city; an oblique
+// form ("Нижнего Новгорода") is only accepted behind a locative preposition,
+// mirroring the single-word gate. It returns the candidate and the index of the
+// token after the last city word.
+func addrMultiWordCity(ctx *Context, i int, caseBlind bool) (addrCandidate, int, bool) {
+	words, k := addrCollectNameWords(ctx, i, caseBlind)
+	if len(words) < 2 {
+		return addrCandidate{}, i, false
+	}
+	for n := len(words); n >= 2; n-- {
+		phrase := addrJoinWords(ctx, words[:n])
+		if !addrCityPhraseOK(ctx, i, phrase) {
+			continue
+		}
+		return addrCandidate{
+			span:           pd.Span{Start: words[0].Start, End: words[n-1].End, Type: pd.TypeCity, Src: "address", Hint: "city"},
+			needsNeighbour: true,
+			residenceOK:    true,
+			name:           phrase,
+		}, k, true
+	}
+	return addrCandidate{}, i, false
+}
+
+// addrHyphenCity matches a hyphenated city ("Ростов-на-Дону",
+// "Петропавловск-Камчатский") starting at token i. The head token must be a
+// known city form and the whole hyphenated chain a known city form phrase; the
+// span then covers the entire chain. It returns the candidate and the index of
+// the token after the last hyphenated word.
+func addrHyphenCity(ctx *Context, i int, caseBlind bool) (addrCandidate, int, bool) {
+	toks := ctx.Tokens
+	words := []text.Token{toks[i]}
+	k := i + 1
+	for k+1 < len(toks) && addrPunctByte(ctx, toks[k], '-') && toks[k+1].Kind == text.KindWord {
+		words = append(words, toks[k+1])
+		k += 2
+	}
+	if len(words) < 2 {
+		return addrCandidate{}, i, false
+	}
+	var b strings.Builder
+	for j, w := range words {
+		if j > 0 {
+			b.WriteByte('-')
+		}
+		b.WriteString(ctx.Lower[w.Start:w.End])
+	}
+	phrase := b.String()
+	if !dict.IsCityFormPhrase(phrase) {
+		return addrCandidate{}, i, false
+	}
+	return addrCandidate{
+		span:           pd.Span{Start: words[0].Start, End: words[len(words)-1].End, Type: pd.TypeCity, Src: "address", Hint: "city"},
+		needsNeighbour: true,
+		residenceOK:    true,
+		name:           phrase,
+	}, k, true
+}
+
+// addrCollectNameWords walks the consecutive name words starting at token i and
+// returns them together with the index of the token after the last one.
+func addrCollectNameWords(ctx *Context, i int, caseBlind bool) ([]text.Token, int) {
+	toks := ctx.Tokens
+	words := make([]text.Token, 0, addrMaxNameWords)
+	k := i
+	for len(words) < addrMaxNameWords && k < len(toks) {
+		t := toks[k]
+		if t.Kind != text.KindWord || !addrIsNameWord(ctx, t, caseBlind) {
+			break
+		}
+		words = append(words, t)
+		k++
+		if !addrCanContinueName(ctx, k, caseBlind) {
+			break
+		}
+		k++
+	}
+	return words, k
+}
+
+// addrCityPhraseOK reports whether a space-joined phrase is a usable city: the
+// nominative is always accepted, an oblique form only behind a locative
+// preposition, mirroring the single-word gate.
+func addrCityPhraseOK(ctx *Context, i int, phrase string) bool {
+	if !dict.IsCityFormPhrase(phrase) {
+		return false
+	}
+	return dict.IsCityPhrase(phrase) || addrPrecededByLocative(ctx, i)
+}
+
+// addrJoinWords joins the lowercased text of consecutive tokens with single
+// spaces, producing the phrase key the city dictionary is indexed by.
+func addrJoinWords(ctx *Context, words []text.Token) string {
+	var b strings.Builder
+	for i, w := range words {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(ctx.Lower[w.Start:w.End])
+	}
+	return b.String()
 }
 
 func addrStartsUpper(s string) bool {
@@ -325,6 +435,37 @@ func addrIsRegionAdjective(ctx *Context, t text.Token, caseBlind bool) bool {
 		return false
 	}
 	for _, suf := range addrRegionAdjSuffixes {
+		if strings.HasSuffix(w, suf) {
+			return true
+		}
+	}
+	return false
+}
+
+// addrStreetAdjSuffixes are the agreeing adjective endings a street name may
+// carry when it stands before its marker ("на Малой Бронной улице").
+var addrStreetAdjSuffixes = []string{
+	"ой", "ая", "ую", "яя", "юю",
+	"ий", "ый", "ого", "ому", "ом", "его", "ему", "ем", "им",
+}
+
+// addrIsStreetAdjective reports whether a word is an uppercase adjective that
+// agrees with a following street name, so it can be folded into the street span.
+func addrIsStreetAdjective(ctx *Context, t text.Token, caseBlind bool) bool {
+	if t.Kind != text.KindWord {
+		return false
+	}
+	if !caseBlind && !addrStartsUpper(ctx.Text[t.Start:t.End]) {
+		return false
+	}
+	w := ctx.Lower[t.Start:t.End]
+	if _, isMarker := addrMarkers[w]; isMarker {
+		return false
+	}
+	if dict.IsStreetType(w) || dict.IsStopWord(w) {
+		return false
+	}
+	for _, suf := range addrStreetAdjSuffixes {
 		if strings.HasSuffix(w, suf) {
 			return true
 		}
@@ -412,6 +553,13 @@ func addrNamedCandidate(ctx *Context, idx, after int, caseBlind bool, spec addrN
 		return addrCandidate{}, idx, false
 	}
 	start, end := toks[p].Start, toks[p].End
+	// A street name that stands BEFORE its marker may carry an agreeing
+	// adjective ("на Малой Бронной улице"): fold it into the span so the
+	// whole name is masked, not just its head noun.
+	if p-2 >= 0 && toks[p-1].Kind == text.KindSpace && toks[p-2].Kind == text.KindWord &&
+		addrIsStreetAdjective(ctx, toks[p-2], caseBlind) {
+		start = toks[p-2].Start
+	}
 	for p-2 >= 0 && addrPunctByte(ctx, toks[p-1], '-') && toks[p-2].Kind == text.KindWord {
 		start = toks[p-2].Start
 		p -= 2
@@ -575,6 +723,26 @@ func addrBareHouse(ctx *Context, i, lastStreetEnd int) (addrCandidate, bool) {
 	}
 	return addrCandidate{
 		span: pd.Span{Start: t.Start, End: t.End, Type: pd.TypeHouse, Src: "address", Hint: "house"},
+	}, true
+}
+
+// addrBareApartment reads the flat number of a run-on "дом-квартира" written
+// right after a bare house number ("ул. Тверская, 7-12"). It only fires on the
+// hyphenated, space-free form, so "7 - 12" and a bare "12" stay untouched.
+func addrBareApartment(ctx *Context, i int, houseEnd int) (addrCandidate, bool) {
+	toks := ctx.Tokens
+	if i+2 >= len(toks) || !addrPunctByte(ctx, toks[i+1], '-') {
+		return addrCandidate{}, false
+	}
+	t := toks[i+2]
+	if t.Kind != text.KindNumber && t.Kind != text.KindAlnum {
+		return addrCandidate{}, false
+	}
+	if !addrIsDigit(ctx.Text[t.Start]) || t.Len() > addrMaxValueLen {
+		return addrCandidate{}, false
+	}
+	return addrCandidate{
+		span: pd.Span{Start: t.Start, End: t.End, Type: pd.TypeApartment, Src: "address", Hint: "apartment"},
 	}, true
 }
 

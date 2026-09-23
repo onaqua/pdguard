@@ -181,8 +181,10 @@ var (
 	reDocDriverLicenseOld = regexp.MustCompile(`[а-яё]{2} ?(?:№ ?)?[0-9]{6}`)
 	// The other pre-2011 layout puts the region code first: "77 АА 123456".
 	reDocDriverLicenseRegion = regexp.MustCompile(`[0-9]{2} ?[а-яё]{2} ?(?:№ ?)?[0-9]{6}`)
-	// 11 digits, optionally grouped 3-3-3-2.
-	reDocSNILS = regexp.MustCompile(`[0-9]{3}[- ]?[0-9]{3}[- ]?[0-9]{3}[- ]?[0-9]{2}`)
+	// 11 digits, optionally grouped 3-3-3-2. The separator between groups is
+	// one to three spaces or hyphens, so the normalised NBSP (two spaces) and
+	// narrow spaces (three spaces) are covered.
+	reDocSNILS = regexp.MustCompile(`[0-9]{3}[- ]{0,3}[0-9]{3}[- ]{0,3}[0-9]{3}[- ]{0,3}[0-9]{2}`)
 	// 2 digits of series, 7 of number — nine digits in total, solid or split.
 	// It takes the same optional label between the halves as the licence above,
 	// and for the same reason: a form writes "загранпаспорт серия 75 номер
@@ -197,8 +199,9 @@ var (
 	// the cue word is the only reliable shape.
 	reDocPermitNumber = regexp.MustCompile(`[0-9]{7,9}`)
 	// 16 digits, solid or in four groups — the same shape as a bank card, which
-	// is exactly why the cue word is mandatory here.
-	reDocOMS = regexp.MustCompile(`[0-9]{16}|[0-9]{4}[ -][0-9]{4}[ -][0-9]{4}[ -][0-9]{4}`)
+	// is exactly why the cue word is mandatory here. The group separator is one
+	// to three spaces or hyphens, covering the normalised NBSP and narrow spaces.
+	reDocOMS = regexp.MustCompile(`[0-9]{16}|[0-9]{4}[- ]{1,3}[0-9]{4}[- ]{1,3}[0-9]{4}[- ]{1,3}[0-9]{4}`)
 	// Policies issued before the single 16-digit number carry a Cyrillic series
 	// and six or seven digits, exactly like a military ID — which is why this
 	// shape may never fire without its own cue word.
@@ -507,15 +510,24 @@ type docProfile struct {
 func docScanProfile(s string) docProfile {
 	var p docProfile
 	run, group := 0, 0
+	sep := 0 // pending separator run length
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch {
 		case c >= '0' && c <= '9':
+			if sep > 3 {
+				group = 0
+			}
+			sep = 0
 			run, group = docProfileDigit(&p, run, group)
 		case c == ' ' || c == '-':
-			run, group = docProfileSep(s, i, &p, run, group)
+			run = 0
+			sep++
+			if c == '-' && i > 0 && docIsRomanByte(s[i-1]) {
+				p.romanDash = true
+			}
 		default:
-			run, group = 0, 0
+			run, group, sep = 0, 0, 0
 		}
 	}
 	return p
@@ -531,21 +543,6 @@ func docProfileDigit(p *docProfile, run, group int) (int, int) {
 	}
 	if group > p.maxGroup {
 		p.maxGroup = group
-	}
-	return run, group
-}
-
-// docProfileSep handles a space or dash separator: it may mark a Roman-dash
-// birth certificate and may let the digit group survive.
-func docProfileSep(s string, i int, p *docProfile, run, group int) (int, int) {
-	if c := s[i]; c == '-' && i > 0 && docIsRomanByte(s[i-1]) {
-		p.romanDash = true
-	}
-	run = 0
-	// The group survives only a separator that actually stands BETWEEN
-	// two digits; anything else ends it.
-	if !(i > 0 && docIsDigitByte(s[i-1]) && i+1 < len(s) && docIsDigitByte(s[i+1])) {
-		group = 0
 	}
 	return run, group
 }
@@ -961,7 +958,7 @@ func docCyrillicSeriesOK(ctx *Context, _, start, end int) bool {
 	if dict.IsStopWord(series) {
 		return false
 	}
-	if ctx.Text == ctx.Lower {
+	if ctx.CaseBlind {
 		return true // no capitalisation anywhere: the test proves nothing
 	}
 	raw, _ := docLeadingRunes(ctx.Text, at, end, 2)

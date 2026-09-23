@@ -306,25 +306,64 @@ func finChainEnd(s string, i int) int {
 		for j < len(s) && finIsDigit(s[j]) {
 			j++
 		}
-		if j+1 < len(s) && finIsChainSep(s[j]) && finIsDigit(s[j+1]) {
-			j++
+		if k, ok := finChainSep(s, j); ok {
+			j = k
 			continue
 		}
 		return j
 	}
 }
 
+// finChainSep returns the offset just past a separator that stands between two
+// digit groups, or ok=false when there is none. A run of one to three spaces is
+// accepted — the normalised NBSP and narrow spaces arrive as two and three
+// spaces — plus a single dash or dot. The three-space cap keeps two adjacent
+// numbers from being glued into one chain.
+func finChainSep(s string, i int) (int, bool) {
+	if i >= len(s) {
+		return 0, false
+	}
+	c := s[i]
+	if c == '-' || c == '.' {
+		if i+1 < len(s) && finIsDigit(s[i+1]) {
+			return i + 1, true
+		}
+		return 0, false
+	}
+	if c != ' ' {
+		return 0, false
+	}
+	j := i
+	for j < len(s) && s[j] == ' ' && j-i < 3 {
+		j++
+	}
+	if j < len(s) && finIsDigit(s[j]) {
+		return j, true
+	}
+	return 0, false
+}
+
+// finIsChainSep reports whether c is a single-byte separator that may stand
+// between two digit groups of a bare value.
 func finIsChainSep(c byte) bool { return c == ' ' || c == '-' || c == '.' }
 
-// chain splits the chain into groups and runs the rules.
+// chain splits the chain into groups and runs the rules. A run of separator
+// bytes (spaces, dashes, dots) between two digit groups is treated as a single
+// separator, so a multi-space gap never yields an empty group.
 func (s *finScan) chain(cs, ce int) {
 	s.groups = s.groups[:0]
 	g := cs
-	for i := cs; i < ce; i++ {
+	i := cs
+	for i < ce {
 		if !finIsDigit(s.lower[i]) {
 			s.groups = append(s.groups, finGroup{g, i})
-			g = i + 1
+			for i < ce && !finIsDigit(s.lower[i]) {
+				i++
+			}
+			g = i
+			continue
 		}
+		i++
 	}
 	s.groups = append(s.groups, finGroup{g, ce})
 	if s.bare {
@@ -543,6 +582,9 @@ func (s *finScan) grouped(i, j int) bool {
 		if a == 4 && b == 6 && c == 5 {
 			return true
 		}
+		if a == 4 && b == 4 && c == 8 {
+			return true
+		}
 	}
 	for k := i; k < j; k++ {
 		if s.groups[k].end-s.groups[k].start != 4 {
@@ -578,7 +620,8 @@ func (s *finScan) accountHit(i int) (int, bool) {
 		if n != finAccountDigits {
 			continue
 		}
-		if s.usedOverlap(s.groups[i].start, s.groups[j].end) {
+		if s.usedOverlap(s.groups[i].start, s.groups[j].end) &&
+			!s.usedWithin(s.groups[i].start, s.groups[j].end) {
 			continue
 		}
 		if s.cue(&s.accountCue, finAccountProbes) &&
@@ -887,6 +930,19 @@ func (s *finScan) usedOverlap(start, end int) bool {
 		}
 	}
 	return false
+}
+
+// usedWithin reports whether every claimed range lies strictly inside
+// [start,end). A longer value that fully contains an earlier, shorter claim —
+// a 20-digit account containing a 16-digit card window — should win, so the
+// caller may release it despite the overlap.
+func (s *finScan) usedWithin(start, end int) bool {
+	for _, u := range s.used {
+		if u[0] < start || u[1] > end {
+			return false
+		}
+	}
+	return true
 }
 
 // scheme returns the payment scheme hint for groups i..j.

@@ -824,15 +824,17 @@ func ppMatchLayout(s string, i int, l *ppDigitLayout) int {
 
 // ppLayoutSeparator returns the offset just past the separator before a group,
 // or -1 when the separator is missing. flexLast allows the separator before the
-// last group to be empty or a single number mark.
+// last group to be empty. A number mark (hyphen, dash, slash, №, #) may stand
+// between any two groups, so "45-09 123456" is a series written with a hyphen
+// between its two pairs.
 func ppLayoutSeparator(s string, i int, flexLast bool) int {
 	j := ppSkipHorizSpace(s, i)
-	if flexLast {
-		if j < len(s) {
-			if r, sz := utf8.DecodeRuneInString(s[j:]); ppIsNumberMark(r) {
-				j = ppSkipHorizSpace(s, j+sz)
-			}
+	if j < len(s) {
+		if r, sz := utf8.DecodeRuneInString(s[j:]); ppIsNumberMark(r) {
+			j = ppSkipHorizSpace(s, j+sz)
 		}
+	}
+	if flexLast {
 		return j
 	}
 	if j == i {

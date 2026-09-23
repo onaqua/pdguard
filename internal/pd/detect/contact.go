@@ -465,8 +465,9 @@ func contactRunDigit(s string, r *contactRun, j int) int {
 }
 
 // contactSepRun consumes the separators at i and returns where the next digit
-// begins. At most two separators may stand between two groups, which is what
-// admits ") " in "(916) 123-45-67" while refusing the line break between two
+// begins. At most three separators may stand between two groups, which is what
+// admits ") " in "(916) 123-45-67" and the normalised NBSP (two spaces) and
+// narrow spaces (three spaces) while refusing the line break between two
 // unrelated numbers.
 //
 // A dot is a separator only when it sits directly between two digits. A full
@@ -475,7 +476,7 @@ func contactRunDigit(s string, r *contactRun, j int) int {
 // then be too long for any rule and BOTH numbers would be lost.
 func contactSepRun(s string, i int) (int, bool, bool) {
 	j, dot := i, false
-	for j < len(s) && j-i < 2 && contactIsPhoneSep(s[j]) {
+	for j < len(s) && j-i < 3 && contactIsPhoneSep(s[j]) {
 		if s[j] == '.' {
 			dot = true
 		}

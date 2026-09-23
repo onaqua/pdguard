@@ -18,7 +18,10 @@ import (
 type Context struct {
 	// Text is the original payload. Offsets in every Span refer to it.
 	Text string
-	// Lower is Text lowercased with byte offsets preserved 1:1.
+	// Lower is Text lowercased with byte offsets preserved 1:1, and with the
+	// non-breaking and narrow space characters normalised to ASCII spaces (see
+	// normalizeSpaces). Detectors search this copy; Text stays untouched so
+	// everything outside a span is masked byte for byte.
 	Lower string
 	// Tokens is the single-pass tokenization of Text.
 	Tokens []text.Token
@@ -26,6 +29,11 @@ type Context struct {
 	// Enabled reports whether a PD type should be looked for at all. Detectors
 	// must consult it before doing expensive work.
 	Enabled func(pd.Type) bool
+
+	// CaseBlind reports whether the payload carries no capitalisation signal:
+	// lowercasing changed nothing. It is computed from the original text, not
+	// from Lower, because Lower also normalises spaces.
+	CaseBlind bool
 
 	// wordIdx maps a byte offset to the index of the token starting there.
 	wordIdx map[int]int
@@ -36,18 +44,81 @@ func NewContext(payload string, enabled func(pd.Type) bool) *Context {
 	if enabled == nil {
 		enabled = func(pd.Type) bool { return true }
 	}
+	lower := text.SafeLower(payload)
 	toks := text.Tokenize(payload)
 	idx := make(map[int]int, len(toks))
 	for i, t := range toks {
 		idx[t.Start] = i
 	}
 	return &Context{
-		Text:    payload,
-		Lower:   text.SafeLower(payload),
-		Tokens:  toks,
-		Enabled: enabled,
-		wordIdx: idx,
+		Text:      payload,
+		Lower:     normalizeSpaces(lower),
+		Tokens:    toks,
+		Enabled:   enabled,
+		CaseBlind: lower == payload,
+		wordIdx:   idx,
 	}
+}
+
+// normalizeSpaces returns a copy of s in which the space characters that
+// Word, Outlook and browsers insert are replaced by the same number of ASCII
+// spaces: U+00A0 (2 bytes) becomes two spaces, and the narrow spaces U+202F,
+// U+2007, U+2009, U+2002 and U+2003 (3 bytes each) become three. The byte
+// length is preserved, so a byte offset found in the result is valid in s.
+// Tabs are left alone: they are already a whitespace character.
+func normalizeSpaces(s string) string {
+	b := []byte(s)
+	if !hasNormalizableSpace(b) {
+		return s
+	}
+	for i := 0; i < len(b); i++ {
+		if isNBSP(b, i) {
+			b[i], b[i+1] = ' ', ' '
+			i++
+			continue
+		}
+		if isNarrowAt(b, i) {
+			b[i], b[i+1], b[i+2] = ' ', ' ', ' '
+			i += 2
+			continue
+		}
+	}
+	return string(b)
+}
+
+// hasNormalizableSpace reports whether s contains a space character that
+// normalizeSpaces would rewrite.
+func hasNormalizableSpace(s []byte) bool {
+	for i := 0; i < len(s); i++ {
+		if isNBSP(s, i) || isNarrowAt(s, i) {
+			return true
+		}
+	}
+	return false
+}
+
+// isNBSP reports whether the bytes at i spell U+00A0 (a non-breaking space).
+func isNBSP(s []byte, i int) bool {
+	return i+1 < len(s) && s[i] == 0xC2 && s[i+1] == 0xA0
+}
+
+// isNarrowAt reports whether the bytes at i spell one of the narrow space
+// characters this package normalises.
+func isNarrowAt(s []byte, i int) bool {
+	return i+2 < len(s) && s[i] == 0xE2 && isNarrowSpace(s[i+1], s[i+2])
+}
+
+// isNarrowSpace reports whether the two bytes after the 0xE2 lead byte spell
+// one of the narrow space characters this package normalises.
+func isNarrowSpace(a, b byte) bool {
+	if a != 0x80 {
+		return false
+	}
+	switch b {
+	case 0xAF, 0x87, 0x89, 0x82, 0x83: // U+202F, U+2007, U+2009, U+2002, U+2003
+		return true
+	}
+	return false
 }
 
 // TokenAt returns the index of the token starting at byte offset off, or -1.
